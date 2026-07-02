@@ -2,10 +2,9 @@
 
 Personal Agent Skills, one per `skills/<name>/SKILL.md`.
 
-These are installed into agents by `npx skills` (and by the `skills` module of
-[dotfiles-bash](https://github.com/asumaran/dotfiles-bash)). For a single target
-agent `npx skills` **copies** the files, so editing a skill here does **not**
-propagate to an already-installed copy until it is reinstalled.
+These are installed into agents by `npx skills`. For a single target agent it
+**copies** the files, so editing a skill here does **not** propagate to an
+already-installed copy until it is reinstalled.
 
 ## When you edit a skill
 

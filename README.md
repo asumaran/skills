@@ -20,10 +20,6 @@ Or a single skill:
 npx skills add asumaran/skills --skill worktree -g -a claude-code -y
 ```
 
-These skills are also installed automatically by the `skills` module of
-[dotfiles-bash](https://github.com/asumaran/dotfiles-bash), which falls back to a
-local symlink installer when `npx` is unavailable.
-
 ## Skills
 
 | Skill | What it does |
