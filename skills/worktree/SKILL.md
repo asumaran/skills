@@ -27,21 +27,29 @@ integration.
 Create a worktree for a **new** branch (creates the branch, no editor):
 
 ```bash
-wt new <branch> -c -e none
+wt new <branch> -c -e none -t
 ```
 
 Create a worktree for an **existing** branch (local or remote):
 
 ```bash
-wt new <branch> -e none
+wt new <branch> -e none -t
 ```
 
-If the repo has a `worktrees.json` (or `.cursor/worktrees.json`) with setup
-scripts, use `setup` instead of `new` so those scripts run:
+`wt new` also runs the setup scripts from `worktrees.json` (or
+`.cursor/worktrees.json`) when the repo has one. When running from a chat
+session (non-TTY), **always pass `-t`**: without it the confirmation prompt
+cannot render and the setup commands are silently skipped.
+
+To re-apply the setup scripts to a worktree that already exists (e.g. the
+scripts changed after it was created), use:
 
 ```bash
-wt setup <branch> -c -e none        # add -t to trust/run without confirmation
+wt setup <branch> -t      # or `wt setup -t` from inside the worktree
+wt setup --all -t         # every worktree of the repo
 ```
+
+`wt setup` never creates worktrees; it only (re)provisions existing ones.
 
 Resolve the path of a worktree **without creating anything** (useful to `cd`
 into it afterward):
@@ -66,6 +74,8 @@ cd "$(wt path <branch>)"
 - `-c, --checkout` — create the branch if it doesn't exist. Needed for a brand
   new branch; omit when the branch already exists.
 - `-e none` — do not open any editor (use this when creating from a chat).
+- `-t, --trust` — run the setup scripts without confirmation. Required from a
+  chat session (non-TTY): without it the scripts are silently skipped.
 - `-i <pm>` — install dependencies with the given package manager (npm, pnpm, bun).
 - `-p <path>` — override the folder name (rarely needed; the default canonical
   path is preferred).
