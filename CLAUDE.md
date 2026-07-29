@@ -2,6 +2,10 @@
 
 Personal Agent Skills, one per `skills/<name>/SKILL.md`.
 
+Skills install globally by default (the dotfiles `skills` module deploys all of
+them to `~/.claude/skills/`). A skill opts out of automatic install with
+`install: manual` in its SKILL.md frontmatter; see the readme.
+
 These are installed into agents by `npx skills`. For a single target agent it
 **copies** the files, so editing a skill here does **not** propagate to an
 already-installed copy until it is reinstalled.
