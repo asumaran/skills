@@ -86,3 +86,32 @@ cd "$(wt path <branch>)"
 directly. If you ever must call the `herdr` CLI against a worktree yourself, note
 that `herdr worktree ...` does not inherit the caller's cwd and must start from
 the main repo root: pass `--cwd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"`.
+
+## Launching a Claude instance in the worktree's herdr space
+
+When the user asks to develop something "en una nueva instancia de claude en el
+space del worktree" (or any phrasing that puts an agent *in the herdr space*),
+they mean an **interactive Claude session running in the herdr pane of that
+worktree** — visible in their sidebar, attachable, steerable. Do NOT substitute
+a headless `claude -p` run from your own session: the deliverable may match but
+the execution mode is part of the request. If the pane flow fails, say so and
+ask before falling back to headless.
+
+For ALL herdr mechanics, **invoke the `herdr` skill** (the official one,
+installed from the herdr binary) and follow it — it owns agent/pane control,
+ID handling, lifecycle states, and safety rules, and it defers exact syntax to
+the installed `herdr --help`. Do not write herdr command lines from memory or
+from this file.
+
+The only worktree-specific facts the herdr skill doesn't know:
+
+- `wt new` / `wt open` already register and focus the worktree's workspace in
+  herdr (executable integration inside `wt`), so after creating the worktree
+  there is normally nothing to open manually — locate that workspace's pane
+  and start the agent there, per the herdr skill.
+- If you do need to open a worktree workspace yourself, remember the `--cwd`
+  quirk from the herdr note above.
+
+Recovery tip: a session that was mistakenly run headless in the worktree can be
+resumed interactively from its pane with `claude --continue` (sessions are
+stored per directory).
