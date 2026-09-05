@@ -44,3 +44,4 @@ installed by hand (e.g. per-project) with `npx skills add ... --skill <name>`.
 |-------|--------------|
 | `gen-commit-msg` | Generate a Conventional Commits message and commit, with selective staging and the user's title/body format. |
 | `worktree` | Create git worktrees with the `wt` CLI following the canonical `~/wt/{repo}/{branch}` layout and herdr integration. |
+| `zed` | Open files, worktrees, diffs or generated output in the Zed editor from a terminal session, picking the right window flag. |
