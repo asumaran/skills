@@ -1,6 +1,6 @@
 ---
 name: worktree
-description: Create git worktrees with the `wt` CLI so they follow the user's conventions (canonical path ~/wt/{repo}/{branch}, automatic herdr integration), and hand work off to a Claude instance in the worktree's herdr space. Use whenever the user asks to create, add, make, or set up a git worktree for a branch, or asks for something to be done "in a new worktree", "in a new space", "in another space/worktree", or "in a separate worktree".
+description: Create git worktrees with the `wt` CLI so they follow the user's conventions (canonical path ~/wt/{repo}/{branch}, automatic herdr integration), and hand work off to a Claude instance in the worktree's herdr space. Use whenever the user asks to create, add, make, or set up a git worktree for a branch, asks for something to be done "in a new worktree", "in a new space", "in another space/worktree", or "in a separate worktree", or asks to merge, integrate, or bring a worktree or branch back into main.
 ---
 
 # Creating git worktrees
@@ -100,6 +100,40 @@ cd "$(wt path <branch>)"
 
 Do not default to this. If the request said "in a new worktree/space", go to the
 handoff section instead.
+
+## Integrating the work back into main
+
+How the work gets into `main` depends on who owns the repo, never on whether it
+was done on a branch or in a worktree:
+
+- **Repos owned by `asumaran`** (`gh repo view --json owner -q .owner.login`):
+  no pull requests. Merge the branch straight into `main` from the main
+  checkout. Never offer "PR or merge?"; the default is merge. A PR only when
+  the user asks or the repo declares a PR workflow (branch protection,
+  `CONTRIBUTING`, a hook rejecting pushes to `main`).
+- **Any other repo:** push the branch and open a PR following that repo's
+  flow. Never merge into `main` yourself.
+
+Only do this when the user asks to merge/integrate; it is a git action like
+any other commit. Pushing and releasing stay separate requests.
+
+Steps for an own repo (`wt merge` merges the given branch into the branch that
+is currently checked out, so run it from the main checkout on `main`):
+
+```bash
+cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"   # main checkout
+git status --short          # must be clean; never use --auto-commit unprompted
+git switch main
+wt merge <branch>           # plain `git merge`: fast-forward when possible, merge commit otherwise
+wt merge <branch> --remove  # same, and deletes the worktree; only when the user asked to clean up
+```
+
+Before merging: the branch's tree is clean and its checks are green (tests,
+build, whatever the repo's CLAUDE.md gates on). If `main` moved since the
+branch was cut and the branch has not been pushed, rebase it onto `main` first
+so the merge fast-forwards; if it was pushed, merge as is and let the user
+decide about history. All git hooks must pass; never `--no-verify` on your
+own (see the `gen-commit-msg` skill).
 
 ## Flags reference
 
