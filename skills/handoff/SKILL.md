@@ -1,0 +1,91 @@
+---
+name: handoff
+description: Write or refresh HANDOFF.md, the untracked session-resume file at the root of a git worktree, so a fresh Claude session can continue the work without this conversation. Use when the user asks for a handoff, says they are about to /clear, asks to save the session state, or when another skill (worker, worktree) needs the handoff written for a new instance.
+---
+
+# Writing HANDOFF.md
+
+`HANDOFF.md` is the resume point of one working session: a new instance reads
+it cold and continues. It lives at the root of the worktree, is never committed,
+and is **overwritten**, never appended: it describes the present, not a log.
+
+The same file serves inside and outside the harness (see
+`~/Developer/dotfiles-bash/modules/claude-code/HARNESS-SPEC.md`, "handoff.md").
+
+## Target
+
+- Argument `<worktree-path>` when given (the `worker` skill passes it, because
+  the coordinator's cwd is not the worktree). Otherwise the current worktree:
+  `git rev-parse --show-toplevel`.
+- Run every git command with `git -C <path>`; never `cd` the session away.
+
+## Preconditions
+
+1. `<path>` is inside a git work tree. If not, stop and say so.
+2. `HANDOFF.md` is **not** tracked:
+   `git -C <path> ls-files --error-unmatch HANDOFF.md` must fail. If it
+   succeeds, stop: excluding a tracked file does nothing, and overwriting it
+   would land in the next commit. Tell the user.
+3. Make sure it is excluded. In a linked worktree `.git` is a file, so resolve
+   the exclude file through git, never by literal path:
+
+   ```bash
+   exclude="$(git -C <path> rev-parse --path-format=absolute --git-path info/exclude)"
+   grep -qxF 'HANDOFF.md' "$exclude" 2>/dev/null || echo 'HANDOFF.md' >> "$exclude"
+   ```
+
+   The exclude file is shared by all worktrees of the repo, which is what we
+   want.
+
+## Content
+
+Overwrite the whole file with these sections, in English, every one present
+(write "none" rather than dropping a section):
+
+```markdown
+# Handoff: <ticket or short title>
+
+Updated: <YYYY-MM-DD HH:MM>  ·  Worktree: <absolute path>  ·  Branch: <branch>
+
+## Objective
+One line, readable cold. What "done" looks like (PR, local verification, report).
+
+## Done
+Real changes, by file, and verified facts (commands run and their results).
+Mark them "already verified, do not re-check".
+
+## In progress
+Exactly what was underway when this was written.
+
+## Next
+Concrete, ordered steps.
+
+## Dead ends
+What was tried and does not work, and why. This is the section a fresh session
+cannot reconstruct; never leave it vague.
+
+## Local decisions
+Decisions already made (approach, names, scope). Say they are decided so the
+next session does not re-litigate them.
+
+## Constraints
+Base branch, files or areas not to touch, tests to run, related files to read
+(absolute paths: plan, brief, report).
+
+## Authority
+What the next session may do on its own: commit, push, open or update a PR,
+rebase. Record ONLY what the user granted explicitly in the conversation, or
+what the harness run grants (its `common.md`). Default when nothing was
+granted: none of them; ask the user.
+
+## Resume prompt
+The exact prompt to paste after clearing, e.g.
+"Read <absolute path>/HANDOFF.md and continue from Next. Never commit it."
+```
+
+## After writing
+
+- Show the user the path and the Resume prompt.
+- Do not commit anything.
+- If the user is about to `/clear`, remind them the Resume prompt is the line
+  to paste into the new session.
