@@ -115,7 +115,9 @@ was done on a branch or in a worktree:
   flow. Never merge into `main` yourself.
 
 Only do this when the user asks to merge/integrate; it is a git action like
-any other commit. Pushing and releasing stay separate requests.
+any other commit. Pushing and releasing stay separate requests. Invoking
+`/ship push` (or a higher level) from a worktree of an own repo **is** that
+request.
 
 Steps for an own repo (`wt merge` merges the given branch into the branch that
 is currently checked out, so run it from the main checkout on `main`):
