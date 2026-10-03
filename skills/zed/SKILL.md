@@ -9,11 +9,16 @@ The user's editor is Zed (`/usr/local/bin/zed`). The `zed` CLI is the only
 control channel: it **pushes** things into the editor and reads nothing back.
 There is no API, socket, or RPC to query editor state.
 
-## Never open anything unprompted
+## Never open anything unprompted, except documents to read
 
 Opening a window takes over the user's screen. Only run `zed` when the user
 asks for it, or offer first and wait. This mirrors the `worktree` skill, which
 passes `-e none` so `wt` does not pop an editor on the user's behalf.
+
+One standing exception, granted in the user's global `CLAUDE.md`: a document
+generated for the user to read (spec, questions, plan, report, message draft)
+is opened with `zed -e <file>` as soon as it is written. Source files edited as
+part of the work are not documents to read and stay unopened.
 
 ## Picking the window flag
 
