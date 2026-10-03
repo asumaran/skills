@@ -178,9 +178,11 @@ from this file.
    focuses the workspace in herdr, so there is normally nothing to open
    manually. Note the `--cwd` quirk above if you ever must open it yourself.
 2. **Write the handoff** before starting the agent (see the checklist below).
-   Short context can go inline in the prompt. Anything longer goes in an
-   untracked `HANDOFF.md` at the worktree root, and the prompt tells the agent
-   to read it first and never to commit it.
+   Short context can go inline in the prompt. Anything longer goes in
+   `HANDOFF.md` at the worktree root, written with the `handoff` skill (pass
+   the worktree path; it keeps the file untracked and excluded), and the
+   prompt tells the agent to read it first and never to commit it. For a
+   ticket or PR, the `worker` skill runs this whole sequence.
 3. **Locate the workspace's shell pane** per the `herdr` skill (list
    workspaces, find the one whose cwd is the worktree path, list its panes).
 4. **Start the agent** in that pane per the `herdr` skill (`agent start` with
