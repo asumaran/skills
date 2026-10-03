@@ -1,11 +1,11 @@
 ---
 name: worker
-description: Launch a worker, a new interactive Claude instance in its own git worktree and herdr space, primed with a HANDOFF.md and a standard boot prompt, for a Jira ticket or GitHub PR. Use when the user asks to "create a worker", "launch a worker for <ticket|PR>", or, as coordinator of a harness run, to start a worker for a ticket.
+description: Launch a worker, a new interactive Claude instance in its own git worktree and herdr space, primed with a HANDOFF.md and a standard boot prompt, for a Jira ticket, a GitHub PR, or a project sub-milestone. Use when the user asks to "create a worker", "launch a worker for <ticket|PR>", or when the project skill splits a milestone (`/worker --milestone <roadmap>#M<n>.<x>`).
 ---
 
 # Launching a worker
 
-`/worker <ticket-url|pr-url> [--run <run-dir>]`
+`/worker <ticket-url|pr-url>` or `/worker --milestone <roadmap>#M<n>.<x>`
 
 This session is the **coordinator**: it prepares and launches; it never edits
 files in the worker's worktree and never changes its own cwd.
@@ -21,31 +21,34 @@ The pieces already exist; this skill only sequences them:
 
 - Ticket URL: read it with `asdev:jira`. PR URL: `gh pr view <url> --json
   number,title,headRefName,headRefOid,baseRefName,body,author`.
+  Milestone: read the roadmap and the `M<n>.<x>` section (see step 2).
 - Repo (`REPO`, an absolute path to its main checkout):
-  - with `--run`: `REPO` from `<run-dir>/run.env`;
+  - with `--milestone`: the roadmap's `Repo:` line (a foreign repo's roadmap
+    lives outside it), else the repo that contains the roadmap;
   - with a PR: the checkout of the PR's repository (`~/Developer/<repo>`);
   - otherwise the current repo; if the ticket does not say which repo, ask.
-- Branch: a PR's `headRefName`; otherwise follow the repo's branch naming (look
-  at recent branches) and confirm it with the user if unsure.
+- Branch: a PR's `headRefName`; a sub-milestone's `Branch:`; otherwise follow
+  the repo's branch naming (look at recent branches) and confirm it with the
+  user if unsure.
 
 Every command against the repo runs as `git -C "$REPO"` or inside a subshell
 `(cd "$REPO" && ...)`, so the coordinator's own cwd never changes.
 
-## 2. Run mode (only with `--run`)
+## 2. Milestone mode (only with `--milestone`)
 
-`--run <run-dir>` is explicit. Never infer a run from directories that happen
-to exist under `~/.claude/harness/`.
+`--milestone <roadmap>#M<n>.<x>` is explicit; it comes from `/project split`.
+Before anything else check that the sub-milestone is launchable:
 
-With `--run`, before anything else check that the run is launchable, as the
-harness entry check requires (`HARNESS-SPEC.md`, "Entry check" and "launch"):
+- the roadmap exists and has a `#### M<n>.<x>:` section with `Done when`
+  criteria and a `Branch:`
+- the user approved the split and granted the workers' Authority in the
+  coordinator's conversation (at least local commits on its branch). If the
+  grant is not there, ask; never assume it
+- the coordinator's checkout is clean: the base is its committed `HEAD`
 
-- `<run-dir>/run.env`, `<run-dir>/PLAN.md` and `<run-dir>/common.md` exist
-- the worker is listed in `PLAN.md` frontmatter (`workers:`), and
-  `<run-dir>/briefs/<TICKET>.md` exists and is not empty
-
-If anything is missing, stop: designing the run and writing the brief is the
-coordinator's job before launching, not this skill's. Read the worker's
-`depends_on` from `PLAN.md`; it decides the base branch in step 3.
+If anything is missing, stop: writing the sub-milestone is the coordinator's
+job (`/project split`), not this skill's. `Depends on:` decides the base
+branch in step 3.
 
 ## 3. Create the worktree (or reuse it)
 
@@ -74,8 +77,9 @@ Otherwise, per the `worktree` skill, from `REPO` in a subshell:
   checked out when the branch is not cached locally). Then check the worktree
   HEAD equals the PR's `headRefOid`; if not, stop.
 - **New branch:** create the branch first from an explicit base, never from
-  whatever the main checkout has checked out. The base is the `depends_on`
-  worker's branch in run mode, else the trunk, `origin/<default branch>`:
+  whatever the main checkout has checked out. The base is the `Depends on`
+  sub-milestone's branch, else the coordinator's committed `HEAD` in milestone
+  mode, else the trunk, `origin/<default branch>`:
   `git -C "$REPO" fetch origin && git -C "$REPO" branch --no-track <branch> <base>`,
   then `(cd "$REPO" && wt new <branch> -e none -t)` (no `-c`: the branch
   exists). `--no-track` matters: tracking the trunk would make `/ship` and
@@ -88,17 +92,17 @@ Confirm the final path with `(cd "$REPO" && wt path <branch>)`.
 
 If `<worktree>/HANDOFF.md` already exists (relaunch), **do not touch it**: it
 holds the worker's own state, dead ends and decisions, which this conversation
-does not know. New context for a relaunch goes in the boot prompt (run mode: a
-new `briefs/<TICKET>-followup-N.md`).
+does not know. New context for a relaunch goes in the boot prompt.
 
 Otherwise invoke the `handoff` skill with the worktree's absolute path. Fill it
 from what this conversation knows: objective, decisions, verified findings,
 constraints, and **Authority**:
 
-- Without `--run`: only what the user granted explicitly in this conversation.
+- Without `--milestone`: only what the user granted explicitly in this conversation.
   Nothing granted means no commit, push, PR or rebase.
-- With `--run`: what the run's `common.md` grants; list the run files under
-  Constraints by absolute path.
+- With `--milestone`: the grant the user gave when approving the split. The
+  `Milestone:` line names the sub-milestone, the roadmap and the plan; the
+  report path goes under Constraints; the Resume prompt is `/project next`.
 
 ## 5. Start the agent and send the boot prompt
 
@@ -107,13 +111,13 @@ with a unique, meaningful name (e.g. `es-2567`), wait until idle, then prompt.
 
 Boot prompt (fill the placeholders; absolute paths only). Write it in Spanish,
 the user's working language with workers. On a relaunch, add one line with
-what changed since the previous launch (or the follow-up brief's path):
+what changed since the previous launch:
 
 ```
-Eres el worker de <TICKET> en <worktree path>.
+Eres el worker de <TICKET o M<n>.<x>> en <worktree path>.
 Lee entero <worktree path>/HANDOFF.md y haz lo que dice.
-[--run] Lee también <run>/common.md, tu brief <run>/briefs/<TICKET>.md, y escribe tu reporte en <run>/reports/<TICKET>.md.
-HANDOFF.md (y cualquier archivo del run) nunca se commitea.
+[--milestone] Corre /project next: trabajas solo en <M<n>.<x>> del roadmap <roadmap path>, y mantienes tu reporte en <reports>/<M<n>.<x>>.md (plantilla del skill project).
+HANDOFF.md (y tu reporte) nunca se commitea.
 Actúa solo dentro de la sección Authority del handoff; para lo demás, pregunta.
 Antes de cualquier /clear, corre /handoff para dejar HANDOFF.md al día.
 Cuando termines, responde solo con la ruta de tu reporte o un resumen de una línea.

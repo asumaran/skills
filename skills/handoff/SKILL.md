@@ -9,8 +9,8 @@ description: Write or refresh HANDOFF.md, the untracked session-resume file at t
 it cold and continues. It lives at the root of the worktree, is never committed,
 and is **overwritten**, never appended: it describes the present, not a log.
 
-The same file serves inside and outside the harness (see
-`~/Developer/dotfiles-bash/modules/claude-code/HARNESS-SPEC.md`, "handoff.md").
+The same file serves inside and outside a project (the `project` skill): with
+project state it also says which milestone the session is on.
 
 ## Target
 
@@ -46,6 +46,7 @@ Overwrite the whole file with these sections, in English, every one present
 # Handoff: <ticket or short title>
 
 Updated: <YYYY-MM-DD HH:MM>  ·  Worktree: <absolute path>  ·  Branch: <branch>
+Milestone: <M<n> or M<n>.<x>>  ·  Roadmap: <absolute path>  ·  Plan: <absolute path or none>
 
 ## Objective
 One line, readable cold. What "done" looks like (PR, local verification, report).
@@ -74,14 +75,23 @@ Base branch, files or areas not to touch, tests to run, related files to read
 
 ## Authority
 What the next session may do on its own: commit, push, open or update a PR,
-rebase. Record ONLY what the user granted explicitly in the conversation, or
-what the harness run grants (its `common.md`). Default when nothing was
-granted: none of them; ask the user.
+rebase. Record ONLY what the user granted explicitly in the conversation
+(for a project worker, the grant given when the split was approved). Default
+when nothing was granted: none of them; ask the user.
 
 ## Resume prompt
 The exact prompt to paste after clearing, e.g.
 "Read <absolute path>/HANDOFF.md and continue from Next. Never commit it."
+With project state: `/project next`.
 ```
+
+## Project state
+
+When the work belongs to a project (the `project` skill finds its roadmap for
+this repo, or the session was started with `/project` or `/worker
+--milestone`), keep the `Milestone:` line and make the Resume prompt
+`/project next`: it reloads the roadmap, the decisions and this file. Without
+project state, drop the `Milestone:` line.
 
 ## After writing
 
