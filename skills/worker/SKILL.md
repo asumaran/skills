@@ -16,8 +16,9 @@ The pieces already exist; this skill only sequences them:
 - the handoff file: the `handoff` skill, with the worktree path as argument
 - every herdr mechanic (panes, `agent start`, `agent prompt`): the `herdr`
   skill. Never write herdr command lines from memory.
-- the lineage record (who launched whom, for `asagents`): `lineage.sh`, next
-  to this file. Always through it, never by editing the JSON by hand.
+- the lineage record (who launched whom and what task each Claude works,
+  for `asagents`; format v2): `lineage.sh`, next to this file. Always
+  through it, never by editing the JSON by hand.
 
 ## 1. Resolve the work
 
@@ -116,8 +117,20 @@ Per the `herdr` skill: find the worktree's pane, `agent start --kind claude`
 with a unique, meaningful name (e.g. `es-2567`; herdr wants a lowercase letter,
 then `[a-z0-9_-]`, at most 32 characters), wait until idle.
 
-Then, before the prompt, write the lineage record with the helper next to this
-file (installed at `~/.claude/skills/worker/lineage.sh`):
+**Before the first launch**, declare this session's own task if it has no
+record yet (`~/.claude/agent-lineage/<its name>.json`): that record is the
+root of the initiative in `asagents` — without it the tree has no head.
+Declare what this session coordinates: the approved plan, or the ticket/PR
+it was asked to split:
+
+```bash
+~/.claude/skills/worker/lineage.sh self --kind plan|ticket|pr|milestone|other \
+  --ref <plan slug | ESHOP-123 | #8088> --title "<plan or ticket title>" \
+  [--plan <absolute path to the approved plan file>]
+```
+
+Then, before the prompt, write the launched Claude's record with the same
+helper (installed at `~/.claude/skills/worker/lineage.sh`):
 
 ```bash
 ~/.claude/skills/worker/lineage.sh launch <name> --pane <worker pane id> \
@@ -125,12 +138,13 @@ file (installed at `~/.claude/skills/worker/lineage.sh`):
   --ref <ESHOP-123 | #8088 | M2.a> --title "<ticket, PR or sub-milestone title>"
 ```
 
-It names this session `coord-<workspace label>` when it has no name yet,
-waits up to 10 s for the worker's session id and writes
-`~/.claude/agent-lineage/<name>.json`. On a relaunch it only updates the
-worker's pane and session and sets the state back to `running`; the
-coordinator and the task stay. If it fails, tell the user and go on: the
-worker works without a record, it only shows up in `asagents` without lineage.
+It names this session `coord-<workspace label>` when it has no name yet
+(and warns if it still has no record of its own), waits up to 10 s for the
+worker's session id and writes `~/.claude/agent-lineage/<name>.json` with
+this session as its parent. On a relaunch it only updates the worker's pane
+and session and sets the state back to `running`; the parent and the task
+stay. If it fails, tell the user and go on: the worker works without a
+record, it only shows up in `asagents` without lineage.
 
 Then send the boot prompt.
 
