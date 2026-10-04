@@ -16,6 +16,8 @@ The pieces already exist; this skill only sequences them:
 - the handoff file: the `handoff` skill, with the worktree path as argument
 - every herdr mechanic (panes, `agent start`, `agent prompt`): the `herdr`
   skill. Never write herdr command lines from memory.
+- the lineage record (who launched whom, for `asagents`): `lineage.sh`, next
+  to this file. Always through it, never by editing the JSON by hand.
 
 ## 1. Resolve the work
 
@@ -100,14 +102,37 @@ constraints, and **Authority**:
 
 - Without `--milestone`: only what the user granted explicitly in this conversation.
   Nothing granted means no commit, push, PR or rebase.
+- Constraints always include the worker's lineage record,
+  `~/.claude/agent-lineage/<name>.json`, and how to update it:
+  `~/.claude/skills/worker/lineage.sh state <name> running|blocked-on-user|finished [text]`,
+  so it survives a `/clear`.
 - With `--milestone`: the grant the user gave when approving the split. The
   `Milestone:` line names the sub-milestone, the roadmap and the plan; the
   report path goes under Constraints; the Resume prompt is `/project next`.
 
-## 5. Start the agent and send the boot prompt
+## 5. Start the agent, record the lineage, send the boot prompt
 
 Per the `herdr` skill: find the worktree's pane, `agent start --kind claude`
-with a unique, meaningful name (e.g. `es-2567`), wait until idle, then prompt.
+with a unique, meaningful name (e.g. `es-2567`; herdr wants a lowercase letter,
+then `[a-z0-9_-]`, at most 32 characters), wait until idle.
+
+Then, before the prompt, write the lineage record with the helper next to this
+file (installed at `~/.claude/skills/worker/lineage.sh`):
+
+```bash
+~/.claude/skills/worker/lineage.sh launch <name> --pane <worker pane id> \
+  --worktree <worktree path> --kind ticket|pr|milestone \
+  --ref <ESHOP-123 | #8088 | M2.a> --title "<ticket, PR or sub-milestone title>"
+```
+
+It names this session `coord-<workspace label>` when it has no name yet,
+waits up to 10 s for the worker's session id and writes
+`~/.claude/agent-lineage/<name>.json`. On a relaunch it only updates the
+worker's pane and session and sets the state back to `running`; the
+coordinator and the task stay. If it fails, tell the user and go on: the
+worker works without a record, it only shows up in `asagents` without lineage.
+
+Then send the boot prompt.
 
 Boot prompt (fill the placeholders; absolute paths only). Write it in Spanish,
 the user's working language with workers. On a relaunch, add one line with
@@ -120,11 +145,12 @@ Lee entero <worktree path>/HANDOFF.md y haz lo que dice.
 HANDOFF.md (y tu reporte) nunca se commitea.
 Actúa solo dentro de la sección Authority del handoff; para lo demás, pregunta.
 Antes de cualquier /clear, corre /handoff para dejar HANDOFF.md al día.
+Tu registro de linaje es ~/.claude/agent-lineage/<name>.json; actualízalo solo con ~/.claude/skills/worker/lineage.sh state <name> ...: blocked-on-user "<pregunta>" cuando me dejes una pregunta, running al retomar tras mi respuesta, finished "<resumen de una línea>" al terminar.
 Cuando termines, responde solo con la ruta de tu reporte o un resumen de una línea.
 ```
 
 ## 6. Report to the user
 
-Workspace, pane, agent name, worktree path, the handoff path, and the Authority
-granted. If the user wants the worker watched, follow the `herdr` skill for a
+Workspace, pane, agent name, worktree path, the handoff path, the lineage
+record, and the Authority granted. If the user wants the worker watched, follow the `herdr` skill for a
 background wait; otherwise stop.

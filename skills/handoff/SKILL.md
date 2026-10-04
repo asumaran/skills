@@ -71,7 +71,8 @@ next session does not re-litigate them.
 
 ## Constraints
 Base branch, files or areas not to touch, tests to run, related files to read
-(absolute paths: plan, brief, report).
+(absolute paths: plan, brief, report). For a worker, its lineage record and
+the `lineage.sh state` command that updates it.
 
 ## Authority
 What the next session may do on its own: commit, push, open or update a PR,
@@ -92,6 +93,14 @@ this repo, or the session was started with `/project` or `/worker
 --milestone`), keep the `Milestone:` line and make the Resume prompt
 `/project next`: it reloads the roadmap, the decisions and this file. Without
 project state, drop the `Milestone:` line.
+
+## Lineage
+
+A worker launched by the `worker` skill has a lineage record
+(`~/.claude/agent-lineage/<name>.json`, read by `asagents`). When the previous
+HANDOFF.md names it under Constraints, keep that line on every rewrite: it is
+how the session finds its record and the `lineage.sh state` command after a
+`/clear`. The handoff never edits the record itself.
 
 ## After writing
 
