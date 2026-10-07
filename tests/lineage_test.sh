@@ -103,5 +103,33 @@ echo "$OUT" | grep -q "reparented 1 child" && ok "reparent reported" || fail "re
 OUT="$(HERDR_PANE_ID=p1 "$LINEAGE" self --kind task --ref ESHOP-1 --title "T")"
 echo "$OUT" | grep -q reparented && fail "reparent not idempotent" || ok "reparent idempotent"
 
+# --- explicit reparent --------------------------------------------------------
+# w-orphan was never recorded by its launcher: it declares itself (parent null)
+# and is then adopted under coord-x with `reparent`.
+cat > "$LINEAGE_DIR/w-orphan.json" <<'JSON'
+{"agent":{"name":"w-orphan","pane_id":"p5","session_id":"s-orphan","workspace_id":"w1","worktree":"/tmp/o"},
+ "parent":null,"task":{"kind":"other","ref":"X","title":"orphan","plan":""},
+ "state":"blocked-on-user","summary":"a question","launched_at":"t","version":2,"updated_at":"t"}
+JSON
+"$LINEAGE" reparent w-orphan --parent coord-x >/dev/null \
+  && ok "reparent writes" || fail "reparent run"
+[ "$(field w-orphan parent.name)" = "coord-x" ] && ok "reparent parent.name" || fail "reparent name"
+[ "$(field w-orphan parent.session_id)" = "s-coord-2" ] \
+  && ok "reparent parent.session from the record" || fail "reparent session"
+[ "$(field w-orphan parent.workspace_label)" = "work" ] \
+  && ok "reparent workspace label from herdr" || fail "reparent label"
+[ "$(field w-orphan state)" = "blocked-on-user" ] && [ "$(field w-orphan task.ref)" = "X" ] \
+  && ok "reparent keeps task and state" || fail "reparent preserved fields"
+expect_fail "reparent to itself is rejected" "$LINEAGE" reparent w-orphan --parent w-orphan
+expect_fail "reparent to a missing record is rejected" "$LINEAGE" reparent w-orphan --parent w-ghost
+# cycle: w-mid hangs under w-orphan; w-orphan may not then hang under w-mid
+cat > "$LINEAGE_DIR/w-mid.json" <<'JSON'
+{"agent":{"name":"w-mid","pane_id":"p6","session_id":"s-mid","workspace_id":"w1","worktree":"/tmp/m"},
+ "parent":{"name":"w-orphan","pane_id":"p5","session_id":"s-orphan","workspace_id":"w1","workspace_label":"work"},
+ "task":{"kind":"other","ref":"X#m","title":"mid","plan":""},
+ "state":"running","summary":"","launched_at":"t","version":2,"updated_at":"t"}
+JSON
+expect_fail "reparent refuses a cycle" "$LINEAGE" reparent w-orphan --parent w-mid
+
 if [ "$FAILS" -gt 0 ]; then echo "$FAILS failure(s)"; exit 1; fi
 echo "all lineage tests passed"

@@ -18,7 +18,12 @@ The pieces already exist; this skill only sequences them:
   skill. Never write herdr command lines from memory.
 - the lineage record (who launched whom and what task each Claude works,
   for `asagents`; format v2): `lineage.sh`, next to this file. Always
-  through it, never by editing the JSON by hand.
+  through it, never by editing the JSON by hand. This applies to EVERY
+  Claude a session starts via herdr, not only `/worker` workers (a child
+  task's coordinator, an ad-hoc helper): record it with `lineage.sh launch`
+  before its boot prompt, or it shows up as a loose root in `asagents`. An
+  existing record moves under another parent with
+  `lineage.sh reparent <name> --parent <name>`.
 - task state (`--task` mode): `status.sh` in the `task` skill. Never edit a
   `TASK.md` frontmatter by hand.
 

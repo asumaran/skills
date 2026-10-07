@@ -73,10 +73,21 @@ never `~`.
    `docs/DECISIONS.md` in the repo and symlink them from the task directory.
 4. **Hand off to the coordinator.** Open a herdr space with cwd at the task
    directory (`herdr` skill), start a Claude there, and prompt it with
-   `/task plan` (plus the context). The coordinator registers the lineage
-   root: `~/.claude/skills/worker/lineage.sh self --kind ticket|task|other
-   --ref <KEY> --title "<title>"`. The session that invoked `/task new`
-   continues with its own work.
+   `/task plan` (plus the context). Lineage: every Claude a session starts
+   via herdr is recorded, not only `/worker` workers.
+   - Task **with `parent:`** (a promoted child): before the prompt, the
+     launching session (the parent task's coordinator) records the new
+     coordinator under itself: `~/.claude/skills/worker/lineage.sh launch
+     <name> --pane <id> --worktree <task dir> --kind task --ref <child KEY>
+     --title "<title>"`. The child coordinator's own `self` keeps that
+     parent; it must not float as a root.
+   - Task **without `parent:`**: a new initiative; no launch record. The
+     coordinator registers itself as the root:
+     `~/.claude/skills/worker/lineage.sh self --kind ticket|task|other
+     --ref <KEY> --title "<title>"`.
+   A record under the wrong parent is fixed with `lineage.sh reparent
+   <name> --parent <name>`, never by editing the JSON. The session that
+   invoked `/task new` continues with its own work.
 
 ## plan [--no-codex]
 
@@ -169,7 +180,9 @@ failing criterion stops the close. Then `status.sh set <id> phase=merged`
 `status.sh promote <id>`: idempotent, fixed order (create
 `work/<child key>/` with `parent:`, then point the row's `task:` at it). A
 row without a ticket promotes as `<KEY>-<id>`. Then plan the child task as
-its own task (`/task plan` in its own coordinator). `status` shows the
+its own task (`/task plan` in its own coordinator, launched per `new`
+step 4: this coordinator records it with `lineage.sh launch`, so the child
+hangs under the parent's coordinator in `asagents`). `status` shows the
 parent row as the child's least-advanced deliverable.
 
 ## link <KEY>

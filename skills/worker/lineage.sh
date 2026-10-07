@@ -23,6 +23,11 @@
 #       parent if it has no name, warns if the parent has no record of its
 #       own, waits up to 10 s for the launched agent's session id, and
 #       writes the record (or updates pane/session on a relaunch).
+#   lineage.sh reparent <agent-name> --parent <agent-name>
+#       Point an existing record at another agent's record as its parent,
+#       keeping its task, state and summary. For records whose launcher did
+#       not record them with `launch`, or when an initiative is adopted
+#       under another session. Refuses a missing parent record and cycles.
 #   lineage.sh state  <agent-name> running|blocked-on-user|finished [--force] [text]
 #       Run by the agent itself. The text is the one-line result (required
 #       with finished) or the pending question (optional with
@@ -243,6 +248,55 @@ def cmd_launch(args):
     if not session:
         warn("the agent's session id is not known yet; its first `state` write fills it")
 
+def cmd_reparent(args):
+    if not args or args[0].startswith("--"):
+        die("reparent needs an agent name")
+    name = args[0]
+    opts = parse_opts(args[1:], ("parent",))
+    pname = valid_name(opts["parent"])
+    if pname == name:
+        die("an agent cannot be its own parent")
+    ppath = record_path(pname)
+    try:
+        with open(ppath) as f:
+            prec = json.load(f)
+    except OSError:
+        die(f"no record for parent {pname} at {ppath}")
+    except ValueError as e:
+        die(f"{ppath} is not valid JSON ({e})")
+    pagent = prec.get("agent")
+    if not pagent:
+        die(f"{ppath} is not a version 2 record")
+    # refuse a cycle: name must not already be an ancestor of the new parent
+    seen, cur = set(), pname
+    while cur and cur not in seen:
+        seen.add(cur)
+        try:
+            with open(record_path(cur)) as f:
+                cur = ((json.load(f).get("parent") or {}).get("name"))
+        except (OSError, ValueError):
+            break
+        if cur == name:
+            die(f"{name} is an ancestor of {pname}; reparenting would loop")
+    label = ""
+    try:
+        snap = snapshot()
+        label = next((w.get("label", "") for w in snap["workspaces"]
+                      if w["workspace_id"] == pagent.get("workspace_id")), "")
+    except (SystemExit, OSError):
+        pass  # no herdr: the label stays empty, everything else is the record's
+    with Locked(name) as rec_file:
+        rec = rec_file.read() or die(f"no record at {rec_file.path}")
+        if "agent" not in rec:
+            die(f"{rec_file.path} is not a version 2 record; remove it and launch again")
+        rec["parent"] = {"name": pagent.get("name", pname),
+                         "pane_id": pagent.get("pane_id"),
+                         "session_id": pagent.get("session_id"),
+                         "workspace_id": pagent.get("workspace_id"),
+                         "workspace_label": label}
+        rec_file.write(rec)
+    print(rec_file.path)
+
 def cmd_state(args):
     force = "--force" in args
     args = [a for a in args if a != "--force"]
@@ -309,6 +363,8 @@ elif cmd == "launch":
     cmd_launch(args)
 elif cmd == "state":
     cmd_state(args)
+elif cmd == "reparent":
+    cmd_reparent(args)
 else:
-    die("usage: lineage.sh path|self|launch|state ... (see the header of this script)")
+    die("usage: lineage.sh path|self|launch|state|reparent ... (see the header of this script)")
 PY
