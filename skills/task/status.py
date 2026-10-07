@@ -589,7 +589,7 @@ def next_action(row, phase, live, live_err, events, report, workers, deps_unmet,
     if phase == "released":
         return "done"
     if phase == "merged":
-        return f"close: /task close {rid}"
+        return f"merged (/task close {rid} only to verify a release)"
     if phase == "closed":
         return "PR closed without merge: decide (new round or drop)"
     if phase == "dropped":
@@ -677,15 +677,23 @@ def consistency(front, task_dir, rows_info):
             if not any(i["row"].get("task") == ck for i in rows_info):
                 findings.append(f"task {ck} says parent: {key} but no row points "
                                 f"at it; finish its promote")
-    # lineage records that claim this task but are in no row
+    # lineage records that claim this task but are in no row. A record whose
+    # ref is the bare key (no #id) is task-level — the coordinator declared
+    # with `lineage.sh self --ref <KEY>` — never a deliverable worker.
+    coordinator = front.get("coordinator")
     for name in lineage_names - known_workers:
+        if name == coordinator:
+            continue
         rec_path = os.path.join(LINEAGE_DIR, f"{name}.json")
         try:
             with open(rec_path) as f:
                 rec = json.load(f)
         except (OSError, ValueError):
             continue
-        if ((rec.get("task") or {}).get("ref") or "").split("#")[0] == key:
+        ref = (rec.get("task") or {}).get("ref") or ""
+        if ref == key:
+            continue
+        if ref.split("#")[0] == key:
             findings.append(f"worker {name} claims this task but no row lists it; "
                             f"add it with status.sh set <id> workers=...")
     return findings

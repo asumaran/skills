@@ -318,6 +318,42 @@ Body prose that must survive every write.
         data = self.show(d, "--no-live")
         self.assertTrue(any("w-stray" in c for c in data["consistency"]))
 
+    def test_consistency_ignores_coordinator_records(self):
+        d = self.make_task()
+        self.run_st("add-row", "A", 'workers=["w-a"]', "phase=implementing",
+                    "--dir", d)
+        with open(os.path.join(self.lineage, "w-a.json"), "w") as f:
+            json.dump({"state": "running", "summary": "",
+                       "task": {"ref": "ESHOP-1#A"}}, f)
+        # the named coordinator, and any task-level record (bare key, no #id),
+        # are not deliverable workers: neither may be flagged
+        self.run_st("set-root", "coordinator=coord-x", "--dir", d)
+        with open(os.path.join(self.lineage, "coord-x.json"), "w") as f:
+            json.dump({"state": "running", "summary": "",
+                       "task": {"ref": "ESHOP-1#A"}}, f)
+        with open(os.path.join(self.lineage, "coord-anon.json"), "w") as f:
+            json.dump({"state": "running", "summary": "",
+                       "task": {"ref": "ESHOP-1"}}, f)
+        data = self.show(d, "--no-live")
+        self.assertFalse(any("coord-x" in c for c in data["consistency"]),
+                         data["consistency"])
+        self.assertFalse(any("coord-anon" in c for c in data["consistency"]),
+                         data["consistency"])
+        # a stray worker record (KEY#id) is still flagged
+        with open(os.path.join(self.lineage, "w-stray.json"), "w") as f:
+            json.dump({"state": "running", "summary": "",
+                       "task": {"ref": "ESHOP-1#B"}}, f)
+        data = self.show(d, "--no-live")
+        self.assertTrue(any("w-stray" in c for c in data["consistency"]))
+
+    def test_merged_next_action_is_not_close(self):
+        d = self.make_task()
+        self.run_st("add-row", "A", "phase=merged", "--dir", d)
+        data = self.show(d, "--no-live")
+        nxt = data["rows"][0]["next"]
+        self.assertNotIn("close: /task close", nxt)
+        self.assertIn("merged", nxt)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
