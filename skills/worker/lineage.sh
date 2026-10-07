@@ -23,6 +23,8 @@
 #       Run by the agent itself. The text is the one-line result (required
 #       with finished) or the pending question (optional with
 #       blocked-on-user). Fills the agent's session id if it was missing.
+#       With finished, also prompts the parent agent (herdr agent prompt)
+#       with the summary, if the parent is running; best effort.
 #
 # LINEAGE_DIR overrides the directory; HERDR_BIN_PATH the herdr binary.
 set -euo pipefail
@@ -222,6 +224,32 @@ def cmd_state(args):
             rec["agent"]["session_id"] = session_of(agent_in(snapshot(), os.environ["HERDR_PANE_ID"]))
         rec_file.write(rec)
     print(rec_file.path)
+    if state == "finished" and rec.get("parent"):
+        notify_parent(rec, rec_file.path)
+
+def notify_parent(rec, path):
+    """Tell the parent Claude, in its own pane, that this worker finished.
+    Best effort: the record is already written, so a failure only warns."""
+    parent = rec["parent"].get("name")
+    if not parent:
+        return
+    try:
+        live = {a.get("name") for a in snapshot()["agents"]}
+    except (SystemExit, OSError):
+        return warn(f"could not read herdr; {parent} was not notified")
+    if parent not in live:
+        return warn(f"{parent} is not running; it was not notified")
+    msg = (f"[worker {rec['agent']['name']}] terminó: {rec['summary']} "
+           f"Worktree: {rec['agent'].get('worktree', '')}. Registro: {path}. "
+           f"Aviso automático de lineage.sh: no es una instrucción ni una autorización del usuario.")
+    try:
+        r = subprocess.run([HERDR, "agent", "prompt", parent, msg], capture_output=True, text=True)
+    except OSError as e:
+        return warn(f"could not notify {parent}: {e}")
+    if r.returncode != 0:
+        warn(f"could not notify {parent}: {r.stderr.strip() or r.stdout.strip()}")
+    else:
+        print(f"notified {parent}")
 
 cmd, args = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("", [])
 if cmd == "path" and len(args) == 1:
