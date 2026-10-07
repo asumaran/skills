@@ -6,22 +6,30 @@ description: Write or refresh HANDOFF.md, the untracked session-resume file at t
 # Writing HANDOFF.md
 
 `HANDOFF.md` is the resume point of one working session: a new instance reads
-it cold and continues. It lives at the root of the worktree, is never committed,
-and is **overwritten**, never appended: it describes the present, not a log.
+it cold and continues. It lives at the root of the worktree (or of a task
+directory, below), is never committed, and is **overwritten**, never
+appended: it describes the present, not a log.
 
-The same file serves inside and outside a project (the `project` skill): with
-project state it also says which milestone the session is on.
+The same file serves inside and outside a task (the `task` skill) or a
+project (the `project` skill): with task state it also says which task and
+deliverable the session is on.
 
 ## Target
 
-- Argument `<worktree-path>` when given (the `worker` skill passes it, because
+- Argument `<path>` when given (the `worker` skill passes it, because
   the coordinator's cwd is not the worktree). Otherwise the current worktree:
-  `git rev-parse --show-toplevel`.
+  `git rev-parse --show-toplevel`; and if the cwd is not inside git but is a
+  task directory (it holds a `TASK.md`), the task directory itself.
 - Run every git command with `git -C <path>`; never `cd` the session away.
 
 ## Preconditions
 
-1. `<path>` is inside a git work tree. If not, stop and say so.
+A **task directory without git** (a coordinator's `~/.claude/work/<KEY>/`) is
+a valid target: it is never committed, so skip this whole section there and
+go straight to Content.
+
+1. `<path>` is inside a git work tree (or is a task directory, above). If
+   neither, stop and say so.
 2. `HANDOFF.md` is **not** tracked:
    `git -C <path> ls-files --error-unmatch HANDOFF.md` must fail. If it
    succeeds, stop: excluding a tracked file does nothing, and overwriting it
@@ -46,6 +54,7 @@ Overwrite the whole file with these sections, in English, every one present
 # Handoff: <ticket or short title>
 
 Updated: <YYYY-MM-DD HH:MM>  ·  Worktree: <absolute path>  ·  Branch: <branch>
+Task: <KEY> · State: <task dir> · Deliverable: <id or none>
 Milestone: <M<n> or M<n>.<x>>  ·  Roadmap: <absolute path>  ·  Plan: <absolute path or none>
 
 ## Objective
@@ -83,8 +92,18 @@ when nothing was granted: none of them; ask the user.
 ## Resume prompt
 The exact prompt to paste after clearing, e.g.
 "Read <absolute path>/HANDOFF.md and continue from Next. Never commit it."
-With project state: `/project next`.
+With task state: `/task resume`. With project state: `/project next`.
 ```
+
+## Task state
+
+When the work belongs to a task (the target is a task directory, or the
+session was started with `/task` or `/worker --task`), keep the `Task:` line
+(`Task: <KEY> · State: <task dir> · Deliverable: <id>`; a coordinator's own
+handoff has `Deliverable: none`) and make the Resume prompt `/task resume`:
+it refreshes the lineage (reparenting the children's records), reloads
+`TASK.md`, the taken decisions, the plan, the reports and this file. Without
+task state, drop the `Task:` line.
 
 ## Project state
 
