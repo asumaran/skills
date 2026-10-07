@@ -1,6 +1,7 @@
 ---
 name: ship
 description: Ship the current work up to a given level, commit, push, release or deploy, following each repo's own documented mechanism. Only runs when the user invokes /ship explicitly.
+argument-hint: "[commit|push|release|deploy]"
 disable-model-invocation: true
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: handoff
 description: Write or refresh HANDOFF.md, the untracked session-resume file at the root of a git worktree, so a fresh Claude session can continue the work without this conversation. Use when the user asks for a handoff, says they are about to /clear, asks to save the session state, or when another skill (worker, worktree) needs the handoff written for a new instance.
+argument-hint: "[worktree-or-task-dir]"
 ---
 
 # Writing HANDOFF.md

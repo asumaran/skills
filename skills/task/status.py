@@ -12,8 +12,11 @@ symlink itself would turn it into a regular file).
 Subcommands (status.sh wraps this file):
   show [--json] [--no-live]      read-only: rows, live PR state against the
                                  .status/ snapshots, reports, lineage, a next
-                                 action per row and the consistency check.
-                                 Never writes anything, not even snapshots.
+                                 action per row, the consistency check and a
+                                 "Next commands:" footer with the 2-3 /task
+                                 commands the state calls for. Never writes
+                                 anything, not even snapshots. When no task
+                                 is found it prints the help after the error.
   show --all [--json] [--live]   read-only: one summary line per task under
                                  WORK_DIR (key, title, coordinator and its
                                  lineage state, row count by phase, most
@@ -35,6 +38,9 @@ Subcommands (status.sh wraps this file):
   ack <id>                       snapshot the row's live PR state into
                                  .status/<id>.json (its events are attended)
   gate <id> <name> done|open     mark one of the row's gates
+  help                           the /task command table, one line per
+                                 command plus an example (the single source
+                                 of truth for /task help)
 
 k=v values parse as JSON when they can (lists, objects, numbers, booleans);
 anything else is the literal string. The task directory is --dir when given,
@@ -818,16 +824,44 @@ def collect_rows(task_dir, front, no_live):
     return sha, rows_info
 
 
+def next_commands(rows_info):
+    """The 2-3 /task commands the rows' next actions call for, most urgent
+    first: a round or ack for new PR events, pending gates, launchable rows,
+    close when every row is merged."""
+    cmds = []
+    for info in rows_info:
+        rid = info["row"].get("id")
+        if info["events"] or info["next"].startswith("round:"):
+            cmds.append(f"/task go {rid} or /task ack {rid}")
+    for info in rows_info:
+        rid = info["row"].get("id")
+        if info["next"].startswith("gate:"):
+            gate = next((g["name"] for g in info["gates"] if not g["done"]), None)
+            if gate:
+                cmds.append(f'/task gate {rid} "{gate}" done')
+    launchable = [str(i["row"].get("id")) for i in rows_info
+                  if i["next"].startswith("launch:")]
+    if launchable:
+        cmds.append(f"/task go {' '.join(launchable)}")
+    phases = {i["phase"] for i in rows_info}
+    if rows_info and phases <= {"merged", "released", "dropped"} \
+            and "merged" in phases:
+        cmds.append("/task close")
+    return cmds[:3]
+
+
 def cmd_show(task_dir, as_json, no_live):
     front, _ = read_task(task_dir)
     sha, rows_info = collect_rows(task_dir, front, no_live)
     findings = consistency(front, task_dir, rows_info)
     auth = front.get("authority") or {}
+    commands = next_commands(rows_info)
     result = {
         "dir": task_dir, "key": front.get("key"), "title": front.get("title"),
         "parent": front.get("parent"), "home": front.get("home"),
         "plan": front.get("plan"), "plan_sha256": sha,
         "authority": auth, "rows": rows_info, "consistency": findings,
+        "next_commands": commands,
     }
     if as_json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -876,6 +910,11 @@ def cmd_show(task_dir, as_json, no_live):
             print(f"- {f}")
     else:
         print("Consistency: ok")
+    if commands:
+        print()
+        print("Next commands:")
+        for c in commands:
+            print(f"- {c}")
 
 
 def urgency(info):
@@ -921,6 +960,7 @@ def cmd_show_all(as_json, live):
             "title": front.get("title"), "coordinator": coordinator,
             "coordinator_state": (lin or {}).get("state") if has_coord else None,
             "phases": phases, "urgent": urgent,
+            "next_commands": next_commands(rows_info),
         })
     if as_json:
         print(json.dumps({"work_dir": WORK_DIR, "live": live, "tasks": tasks},
@@ -945,9 +985,57 @@ def cmd_show_all(as_json, live):
     widths = [max(len(r[i]) for r in [headers, *table]) for i in range(5)]
     for r in [headers, *table]:
         print("  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip())
+    with_cmds = [t for t in tasks if t["next_commands"]]
+    if with_cmds:
+        print()
+        print("Next commands:")
+        for t in with_cmds:
+            print(f"- {t['key']}: " + " · ".join(t["next_commands"][:2]))
     if not live:
         print()
         print("Local state only (snapshots, lineage); --live asks gh.")
+
+
+HELP_ROWS = (
+    ('new <url|KEY|"idea">', "create the task state, or adopt an in-flight one",
+     "/task new ESHOP-1270"),
+    ("plan [--no-codex]", "plan cycle: grill, second opinion, deliverables",
+     "/task plan"),
+    ("go [id|all]", "launch the launchable deliverables via workers",
+     "/task go F"),
+    ("status [--all]", "read-only state of this task, or of every task",
+     "/task status --all"),
+    ("resume", "the coordinator's retake contract (lineage, state, handoff)",
+     "/task resume"),
+    ("decide", "append a numbered decision to DECISIONS.md",
+     "/task decide"),
+    ("close [id]", "verify the Done when criteria and mark merged/released",
+     "/task close F"),
+    ("promote <id>", "make the row its own child task",
+     "/task promote F"),
+    ("link <KEY>", "attach a later ticket to a task created by slug",
+     "/task link ESHOP-99"),
+    ("gate <id> <gate> done", "mark a human-verified gate on a row",
+     '/task gate F "CORS deployed" done'),
+    ("ack <id>", "snapshot the row's PR events as attended",
+     "/task ack F"),
+    ("new-repo <name>", "create a repo and a task with home: repo",
+     "/task new-repo my-tool"),
+    ("help", "this table",
+     "/task help"),
+)
+
+
+def cmd_help(out=None):
+    """The /task command table. Single source of truth for /task help: the
+    SKILL.md sections describe each command, but the printable table lives
+    only here."""
+    out = out or sys.stdout
+    print("/task commands (bare /task is status; state ops go through "
+          "status.sh):", file=out)
+    w = max(len(cmd) for cmd, _, _ in HELP_ROWS)
+    for cmd, desc, example in HELP_ROWS:
+        print(f"  {cmd.ljust(w)}  {desc}  ·  {example}", file=out)
 
 
 def cmd_workers_in(worktree, as_json):
@@ -1166,11 +1254,16 @@ def main():
             rest.append(args[i])
             i += 1
     if not rest:
-        die("usage: status.sh show|workers-in|add-row|set|set-root|promote|"
-            "ack|gate ... (see the header of status.py)")
+        die("usage: status.sh show|help|workers-in|add-row|set|set-root|"
+            "promote|ack|gate ... (see the header of status.py)")
     cmd, args = rest[0], rest[1:]
     if show_all and cmd != "show":
         die("--all only applies to show")
+    if cmd == "help":
+        if args:
+            die("help takes no arguments")
+        cmd_help()
+        return
     if cmd == "show" and show_all:
         if args:
             die("show takes no positional arguments")
@@ -1181,7 +1274,14 @@ def main():
             die("workers-in needs exactly a worktree path")
         cmd_workers_in(args[0], as_json)
         return
-    task_dir = find_task_dir(explicit_dir)
+    try:
+        task_dir = find_task_dir(explicit_dir)
+    except SystemExit:
+        # bare /task outside any task: the help, not only the error
+        if cmd == "show":
+            print(file=sys.stderr)
+            cmd_help(sys.stderr)
+        raise
     if cmd == "show":
         if args:
             die("show takes no positional arguments")

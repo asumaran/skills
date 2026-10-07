@@ -1,6 +1,7 @@
 ---
 name: worker
 description: Launch a worker, a new interactive Claude instance in its own git worktree and herdr space, primed with a HANDOFF.md and a standard boot prompt, for a Jira ticket, a GitHub PR, or a task deliverable. Use when the user asks to "create a worker", "launch a worker for <ticket|PR>", or when the task skill launches a deliverable (`/worker --task <task dir>#<id> [--round N]`).
+argument-hint: "<ticket-url|pr-url> | --task <dir>#<id> [--round N]"
 ---
 
 # Launching a worker

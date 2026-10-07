@@ -368,6 +368,72 @@ Body prose that must survive every write.
         tasks = self.all_tasks()  # no --live: must not touch gh at all
         self.assertEqual(tasks["C-TASK"]["urgent"]["id"], "R")
 
+    # ------------------------------------------- help and next commands
+
+    def test_help_lists_every_command(self):
+        r = self.run_st("help")
+        for cmd in ("new", "plan", "go", "status", "resume", "decide",
+                    "close", "promote", "link", "gate", "ack", "new-repo",
+                    "help"):
+            self.assertIn(f"/task {cmd}", r.stdout)
+        r = self.run_st("help", "extra", check=False)
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_show_without_task_prints_help_after_error(self):
+        r = self.run_st("show", cwd=self.tmp, check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("no task found", r.stderr)
+        self.assertIn("/task help", r.stderr)  # the table follows the error
+        # only show appends the help; other commands keep the bare error
+        r = self.run_st("ack", "A", cwd=self.tmp, check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("/task help", r.stderr)
+
+    def test_next_commands_footer(self):
+        d = self.make_task()
+        self.run_st("add-row", "A", "phase=planned", "--dir", d)
+        self.run_st("add-row", "B", "phase=planned", "--dir", d)
+        self.run_st("add-row", "G",
+                    'gates=[{"name":"CORS deployed","done":false}]', "--dir", d)
+        url = self.fixture_pr("70", comments=0)
+        self.run_st("add-row", "E", "phase=in-review", f"pr={url}", "--dir", d)
+        self.run_st("ack", "E", "--dir", d)
+        self.fixture_pr("70", comments=2)
+        data = self.show(d)
+        self.assertEqual(data["next_commands"],
+                         ["/task go E or /task ack E",
+                          '/task gate G "CORS deployed" done',
+                          "/task go A B"])
+        r = self.run_st("show", "--dir", d)
+        self.assertIn("Next commands:", r.stdout)
+        self.assertIn("- /task go A B", r.stdout)
+
+    def test_next_commands_close_and_quiet_states(self):
+        d = self.make_task()
+        self.run_st("add-row", "A", "phase=merged", "--dir", d)
+        self.run_st("add-row", "B", "phase=released", "--dir", d)
+        data = self.show(d, "--no-live")
+        self.assertEqual(data["next_commands"], ["/task close"])
+        # an in-flight row: nothing to suggest, no footer
+        self.run_st("add-row", "C", "phase=implementing", "--dir", d)
+        data = self.show(d, "--no-live")
+        self.assertEqual(data["next_commands"], [])
+        r = self.run_st("show", "--no-live", "--dir", d)
+        self.assertNotIn("Next commands:", r.stdout)
+
+    def test_show_all_next_commands(self):
+        a = self.make_task("A-TASK")
+        self.run_st("add-row", "L", "phase=planned", "--dir", a)
+        b = self.make_task("B-TASK")
+        self.run_st("add-row", "W", "phase=implementing", "--dir", b)
+        tasks = self.all_tasks()
+        self.assertEqual(tasks["A-TASK"]["next_commands"], ["/task go L"])
+        self.assertEqual(tasks["B-TASK"]["next_commands"], [])
+        r = self.run_st("show", "--all")
+        footer = r.stdout.split("Next commands:")[1]
+        self.assertIn("- A-TASK: /task go L", footer)
+        self.assertNotIn("B-TASK", footer)
+
     # ------------------------------------------------------ workers-in
 
     def test_workers_in(self):

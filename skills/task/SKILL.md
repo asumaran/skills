@@ -1,11 +1,12 @@
 ---
 name: task
 description: Run any assignment as a task, a node with optional parent and children; a Jira ticket, an idea without a ticket, or a personal project. State lives in ~/.claude/work/<KEY>/ (TASK.md frontmatter, plan.md, numbered decisions, reports) and is operated with status.sh, never by editing the YAML by hand. Use when the user says /task, "new task", "task status", "what is left on <KEY>", "launch the deliverables", "promote <id>", or asks to adopt an in-flight ticket.
+argument-hint: "<new|plan|go|status|resume|decide|close|promote|link|gate|ack|new-repo|help> [args]"
 ---
 
 # Task: every assignment is a node
 
-`/task <new|plan|go|status|resume|decide|close|promote|link|gate|ack|new-repo> [args]`
+`/task <new|plan|go|status|resume|decide|close|promote|link|gate|ack|new-repo|help> [args]`
 Bare `/task` is `/task status`.
 
 A **task** is one assignment: a Jira ticket, an idea without a ticket, or a
@@ -41,8 +42,8 @@ With `home: repo` (a root task in one of the user's own repos), `TASK.md` and
 
 **Every state operation goes through `status.sh`** (next to this file;
 installed at `~/.claude/skills/task/status.sh`): `show [--json] [--no-live]`,
-`show --all [--live]`, `workers-in <worktree>`, `add-row`, `set`, `set-root`,
-`promote`, `ack`, `gate`. Never edit the frontmatter by hand. Row `k=v` values parse as JSON when possible:
+`show --all [--live]`, `help`, `workers-in <worktree>`, `add-row`, `set`,
+`set-root`, `promote`, `ack`, `gate`. Never edit the frontmatter by hand. Row `k=v` values parse as JSON when possible:
 `status.sh set F depends_on='[{"id":"B","until":"merged"}]'`.
 
 The `key:` is the Jira KEY, or a confirmed `<repo>-<words>` slug. It is also
@@ -104,8 +105,12 @@ never `~`.
      `~/.claude/skills/worker/lineage.sh self --kind ticket|task|other
      --ref <KEY> --title "<title>"`.
    A record under the wrong parent is fixed with `lineage.sh reparent
-   <name> --parent <name>`, never by editing the JSON. The session that
-   invoked `/task new` continues with its own work.
+   <name> --parent <name>`, never by editing the JSON. The new coordinator's
+   **first act** is to record itself on the task: `status.sh set-root
+   coordinator=<its herdr agent name>` (the basename of the record path
+   `lineage.sh self` prints); that is what lets bare `/task` and `show
+   --all` resolve the task by coordinator. The session that invoked
+   `/task new` continues with its own work.
 
 ## plan [--no-codex]
 
@@ -163,13 +168,19 @@ promote half-done, stale plan sha). A row waiting on a dependency whose PR
 has red CI or new comments shows both (`CI red (2) · then wait: ...`): red CI
 is never hidden. It never writes, not even snapshots. When rows have `child`
 tickets, add their Jira status with `asdev:jira`. New PR events stay "new"
-until a round is launched or `/task ack <id>` is run.
+until a round is launched or `/task ack <id>` is run. Under the table it
+prints a "Next commands:" footer with the 2-3 `/task` commands the state
+calls for (`go` for launchable rows or rounds, `gate ... done` for pending
+gates, `ack` for new PR events, `close` when everything is merged). When
+nothing resolves a task, it prints the command table (`status.sh help`)
+after the "no task found" error.
 
 `/task status --all`: `status.sh show --all`, one line per task under
 `~/.claude/work` (key, title, coordinator and its lineage state, row count by
 phase, and the most urgent next action, ranked red CI > new events or blocked
 workers > launchable rows > waits). It reads only local state (snapshots,
 lineage) so it stays fast; `--live` asks gh per PR. `--json` for machine use.
+Its footer lists the next commands per task that has any.
 
 ## resume
 
@@ -179,7 +190,10 @@ handoff. In order:
 1. `~/.claude/skills/worker/lineage.sh self --kind <kind> --ref <KEY> --title
    "<title>"`: refreshes this session's record and **reparents** its
    children's records (a `/clear` changed the session id; without this,
-   workers' finish notices miss).
+   workers' finish notices miss). Then `status.sh set-root
+   coordinator=<own herdr agent name>` (the basename of the record path
+   `self` just printed): idempotent, and it keeps the by-coordinator
+   resolution of bare `/task` working after a rename or an adopted task.
 2. Load, whole: `HANDOFF.md`, `TASK.md` (frontmatter and body), every
    decision with Status `taken` in full, `plan.md`, and the reports.
 3. Run `status.sh show` (it resolves the task by cwd, worktree/branch, or
@@ -247,6 +261,15 @@ The contract of the old `project new`, then a task on top:
    dotfiles commit the user approves).
 4. `/task new "<name>"` with `home: repo` (TASK.md and DECISIONS.md in
    `docs/`, symlinked from `work/`), and hand off to its herdr space.
+
+## help
+
+Run `status.sh help` and show its output as is: the command table, one line
+per command plus an example. The table lives only in `status.py`
+(`HELP_ROWS`), so script and skill cannot drift; this file explains each
+command, the script prints the quick reference. Bare `/task` outside any
+task gets the same table from `status.sh show` itself, after the "no task
+found" error.
 
 ## Workers, rounds and confirmation
 

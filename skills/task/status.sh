@@ -5,6 +5,7 @@
 #
 #   status.sh show [--json] [--no-live] [--dir <task dir>]
 #   status.sh show --all [--json] [--live]
+#   status.sh help
 #   status.sh workers-in <worktree> [--json]
 #   status.sh add-row <id> [k=v ...]
 #   status.sh set <id> k=v [...]
