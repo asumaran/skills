@@ -6,25 +6,32 @@
 # ends), writes a temporary file and renames it over the record.
 #
 #   lineage.sh path   <agent-name>
-#   lineage.sh self   --kind plan|ticket|pr|milestone|other --ref <ref> \
+#   lineage.sh self   --kind plan|ticket|pr|task|milestone|other --ref <ref> \
 #                     --title <title> [--plan <abs path>]
 #       Run by any Claude to declare (or update) its own task: an
 #       orchestrator declares the plan it received (--plan points at the
 #       approved plan file) before its first launch. Names the calling
 #       session coord-<workspace label> if it has no name. Keeps the
 #       record's parent if one exists; writes parent null otherwise.
+#       Also reparents: every record whose parent.name is this agent gets
+#       its parent.session_id and parent.pane_id refreshed, so a /clear
+#       (which changes the session id) does not leave the children's
+#       notices pointing at a ghost parent.
 #   lineage.sh launch <agent-name> --pane <id> --worktree <abs> \
-#                     --kind ticket|pr|milestone --ref <ref> --title <title>
+#                     --kind ticket|pr|task|milestone|other --ref <ref> --title <title>
 #       Run by the parent (/worker) right after `agent start`. Names the
 #       parent if it has no name, warns if the parent has no record of its
 #       own, waits up to 10 s for the launched agent's session id, and
 #       writes the record (or updates pane/session on a relaunch).
-#   lineage.sh state  <agent-name> running|blocked-on-user|finished [text]
+#   lineage.sh state  <agent-name> running|blocked-on-user|finished [--force] [text]
 #       Run by the agent itself. The text is the one-line result (required
 #       with finished) or the pending question (optional with
-#       blocked-on-user). Fills the agent's session id if it was missing.
-#       With finished, also prompts the parent agent (herdr agent prompt)
-#       with the summary, if the parent is running; best effort.
+#       blocked-on-user). Refuses to write unless HERDR_PANE_ID matches the
+#       record's pane (--force overrides): after a round handoff only the
+#       record's current owner may write it. Fills the agent's session id
+#       if it was missing. With finished, also prompts the parent agent
+#       (herdr agent prompt) with the summary, if the parent is running;
+#       best effort.
 #
 # LINEAGE_DIR overrides the directory; HERDR_BIN_PATH the herdr binary.
 set -euo pipefail
@@ -34,8 +41,8 @@ import datetime, fcntl, json, os, re, subprocess, sys, tempfile, time
 DIR = os.environ.get("LINEAGE_DIR") or os.path.expanduser("~/.claude/agent-lineage")
 HERDR = os.environ.get("HERDR_BIN_PATH") or "herdr"
 STATES = ("running", "blocked-on-user", "finished")
-SELF_KINDS = ("plan", "ticket", "pr", "milestone", "other")
-LAUNCH_KINDS = ("ticket", "pr", "milestone")
+SELF_KINDS = ("plan", "ticket", "pr", "task", "milestone", "other")
+LAUNCH_KINDS = ("ticket", "pr", "task", "milestone", "other")
 
 def die(msg):
     print(f"lineage: {msg}", file=sys.stderr)
@@ -168,6 +175,35 @@ def cmd_self(args):
                    "state": "running", "summary": "", "launched_at": now()}
         rec_file.write(rec)
     print(rec_file.path)
+    reparent_children(me)
+
+def reparent_children(me):
+    """Refresh parent.session_id/pane_id in every record whose parent.name
+    is this agent. A /clear gives the parent a new session id; without this
+    the children's finish notices point at a ghost."""
+    if not os.path.isdir(DIR):
+        return
+    fixed = 0
+    for fn in sorted(os.listdir(DIR)):
+        if not fn.endswith(".json") or fn == me["name"] + ".json":
+            continue
+        name = fn[:-5]
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name):
+            continue
+        with Locked(name) as rec_file:
+            rec = rec_file.read()
+            parent = (rec or {}).get("parent") or {}
+            if parent.get("name") != me["name"]:
+                continue
+            if (parent.get("session_id") == me["session_id"]
+                    and parent.get("pane_id") == me["pane_id"]):
+                continue
+            parent["session_id"] = me["session_id"]
+            parent["pane_id"] = me["pane_id"]
+            rec_file.write(rec)
+            fixed += 1
+    if fixed:
+        print(f"reparented {fixed} child record(s)")
 
 def cmd_launch(args):
     if not args or args[0].startswith("--"):
@@ -208,8 +244,10 @@ def cmd_launch(args):
         warn("the agent's session id is not known yet; its first `state` write fills it")
 
 def cmd_state(args):
+    force = "--force" in args
+    args = [a for a in args if a != "--force"]
     if len(args) < 2 or args[1] not in STATES:
-        die(f"usage: state <agent-name> {'|'.join(STATES)} [summary]")
+        die(f"usage: state <agent-name> {'|'.join(STATES)} [--force] [summary]")
     name, state, summary = args[0], args[1], " ".join(args[2:])
     if state == "finished" and not summary:
         die("finished needs a one-line summary")
@@ -217,6 +255,17 @@ def cmd_state(args):
         rec = rec_file.read() or die(f"no record at {rec_file.path}")
         if "agent" not in rec:
             die(f"{rec_file.path} is not a version 2 record; remove it and launch again")
+        # only the record's current owner writes it: after a round handoff
+        # the previous worker's pane must not flip the new worker's state
+        pane = os.environ.get("HERDR_PANE_ID")
+        rec_pane = rec["agent"].get("pane_id")
+        if not force:
+            if not pane:
+                die(f"HERDR_PANE_ID is not set, so this pane cannot be checked "
+                    f"against the record's ({rec_pane}); use --force to override")
+            if rec_pane and pane != rec_pane:
+                die(f"this pane ({pane}) is not the record's pane ({rec_pane}); "
+                    f"{name} belongs to another pane now; use --force to override")
         rec["state"] = state
         # finished: the one-line result; blocked-on-user: the question, if given; running: nothing
         rec["summary"] = summary
