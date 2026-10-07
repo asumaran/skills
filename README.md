@@ -56,7 +56,6 @@ bash tests/lineage_test.sh
 | `gen-commit-msg` | Generate a Conventional Commits message and commit, with selective staging and the user's title/body format. |
 | `handoff` | Write or refresh `HANDOFF.md`, the untracked resume file at a worktree or task directory root, so a fresh session can continue the work. |
 | `pr-collapsible-tests` | Reorganize the manual test steps of a PR description into collapsible `<details>` toggles. |
-| `project` | `/project init\|status\|next\|decide\|close\|split\|new`: run a project milestone by milestone with its state in a roadmap and a numbered decisions log, sequentially (relayed with `/handoff` and `/project next`) or in parallel through workers. |
 | `ship` | `/ship [commit\|push\|release\|deploy]`: ship the current work up to the given level using the repo's documented mechanism. Explicit invocation only. |
 | `task` | `/task new\|plan\|go\|status\|resume\|decide\|close\|promote\|link\|gate\|ack\|new-repo`: run any assignment (a Jira ticket, an idea, a personal project) as a task with its state in `~/.claude/work/<KEY>/` (`TASK.md` frontmatter operated by `status.sh`, a plan, numbered decisions, reports), launching deliverables through workers. |
 | `worker` | Launch a Claude worker for a ticket, a PR or a task deliverable (`--task <dir>#<id>`, rounds with `--round N`) in its own worktree and herdr space, with a handoff, a standard boot prompt and a lineage record (`lineage.sh`) that `asagents` draws the agents tree from. |
