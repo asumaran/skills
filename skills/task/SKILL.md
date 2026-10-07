@@ -41,8 +41,8 @@ With `home: repo` (a root task in one of the user's own repos), `TASK.md` and
 
 **Every state operation goes through `status.sh`** (next to this file;
 installed at `~/.claude/skills/task/status.sh`): `show [--json] [--no-live]`,
-`add-row`, `set`, `set-root`, `promote`, `ack`, `gate`. Never edit the
-frontmatter by hand. Row `k=v` values parse as JSON when possible:
+`show --all [--live]`, `workers-in <worktree>`, `add-row`, `set`, `set-root`,
+`promote`, `ack`, `gate`. Never edit the frontmatter by hand. Row `k=v` values parse as JSON when possible:
 `status.sh set F depends_on='[{"id":"B","until":"merged"}]'`.
 
 The `key:` is the Jira KEY, or a confirmed `<repo>-<words>` slug. It is also
@@ -63,8 +63,16 @@ never `~`.
    adopt: set `legacy: <that path>` in the frontmatter, rebuild the
    deliverables from the **live state** (`gh pr view`, branches, worktrees),
    never from the old docs' text, and confirm row by row with the user.
-   Nothing is moved or archived; old absolute references keep working. No
-   new plan is launched automatically.
+   For each adopted row with an existing worktree, run `status.sh workers-in
+   <worktree>`: it lists the lineage records whose `agent.worktree` matches
+   and the herdr agents living there. Put the recorded names in the row's
+   `workers` (`status.sh set <id> workers=[...]`), so the consistency check
+   does not report "worktree without a worker" for agents that exist. An
+   agent the helper reports as unrecorded (no name or no lineage record) is
+   named and recorded under this coordinator first (`herdr agent rename`,
+   then `lineage.sh launch <name> --pane <id> --worktree <path> ...`), with
+   the user's confirmation. Nothing is moved or archived; old absolute
+   references keep working. No new plan is launched automatically.
 3. **Create the state**, idempotent (a second run on the same ticket changes
    nothing): `mkdir -p ~/.claude/work/<KEY>`, `TASK.md` and `DECISIONS.md`
    from the templates, then `status.sh set-root` for key, title, link, stack,
@@ -73,7 +81,17 @@ never `~`.
    `docs/DECISIONS.md` in the repo and symlink them from the task directory.
 4. **Hand off to the coordinator.** Open a herdr space with cwd at the task
    directory (`herdr` skill), start a Claude there, and prompt it with
-   `/task plan` (plus the context). Lineage: every Claude a session starts
+   `/task plan` (plus the context). Trust dialog: a brand-new
+   `~/.claude/work/<KEY>/` blocks the Claude on "Do you trust the files in
+   this folder?". The documented fix is trusting the parent once: run
+   `claude` in `~/.claude/work` itself and accept; outside a git repository
+   that trust covers every subdirectory except nested git repos (Claude Code
+   docs, permissions → workspace trust). The docs also name the manual
+   mechanism (`projects["<path>"].hasTrustDialogAccepted: true` in
+   `~/.claude.json`, permissions → "What runs before you trust a folder"),
+   but prefer the one-time parent trust: Claude Code owns that file. If the
+   dialog still appears, detect it in the pane and ask the user before
+   accepting anything (herdr skill). Lineage: every Claude a session starts
    via herdr is recorded, not only `/worker` workers.
    - Task **with `parent:`** (a promoted child): before the prompt, the
      launching session (the parent task's coordinator) records the new
@@ -135,13 +153,23 @@ complete an interrupted one.
 
 Read-only. Run `status.sh show` (`--json` for machine use): it detects the
 task from the cwd (the task directory, or a worktree whose branch or path is
-in some row), prints the rows with live PR state (`gh pr view`: state, draft,
-checks, review decision, new comments vs the `.status/` snapshot), the
-reports, the lineage states, a next action per row, and the consistency
-check (worktree without worker, worker without row, promote half-done, stale
-plan sha). It never writes, not even snapshots. When rows have `child`
+in some row; if neither matches, the calling agent's herdr name against
+`coordinator:` in every TASK.md, so bare `/task` works for a coordinator
+whose cwd is not the task directory), prints the rows with live PR state
+(`gh pr view`: state, draft, checks, review decision, new comments vs the
+`.status/` snapshot), the reports, the lineage states, a next action per row,
+and the consistency check (worktree without worker, worker without row,
+promote half-done, stale plan sha). A row waiting on a dependency whose PR
+has red CI or new comments shows both (`CI red (2) · then wait: ...`): red CI
+is never hidden. It never writes, not even snapshots. When rows have `child`
 tickets, add their Jira status with `asdev:jira`. New PR events stay "new"
 until a round is launched or `/task ack <id>` is run.
+
+`/task status --all`: `status.sh show --all`, one line per task under
+`~/.claude/work` (key, title, coordinator and its lineage state, row count by
+phase, and the most urgent next action, ranked red CI > new events or blocked
+workers > launchable rows > waits). It reads only local state (snapshots,
+lineage) so it stays fast; `--live` asks gh per PR. `--json` for machine use.
 
 ## resume
 
@@ -154,7 +182,9 @@ handoff. In order:
    workers' finish notices miss).
 2. Load, whole: `HANDOFF.md`, `TASK.md` (frontmatter and body), every
    decision with Status `taken` in full, `plan.md`, and the reports.
-3. Run `status.sh show` and continue from the handoff's Next.
+3. Run `status.sh show` (it resolves the task by cwd, worktree/branch, or
+   this agent's name against `coordinator:`, so it works from wherever the
+   coordinator lives) and continue from the handoff's Next.
 
 ## decide
 

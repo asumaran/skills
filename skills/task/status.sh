@@ -4,6 +4,8 @@
 # over the real one, written to realpath so `home: repo` symlinks survive).
 #
 #   status.sh show [--json] [--no-live] [--dir <task dir>]
+#   status.sh show --all [--json] [--live]
+#   status.sh workers-in <worktree> [--json]
 #   status.sh add-row <id> [k=v ...]
 #   status.sh set <id> k=v [...]
 #   status.sh set-root k=v [...]

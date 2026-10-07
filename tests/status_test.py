@@ -23,6 +23,13 @@ if [ ! -f "$f" ]; then echo "GraphQL: Could not resolve PR" >&2; exit 1; fi
 cat "$f"
 """
 
+FAKE_HERDR = """#!/usr/bin/env bash
+# fake herdr: `herdr api snapshot` -> $HERDR_SNAPSHOT_FILE
+if [ "$1 $2" != "api snapshot" ]; then echo "unexpected: $*" >&2; exit 1; fi
+if [ ! -f "$HERDR_SNAPSHOT_FILE" ]; then echo "no herdr" >&2; exit 1; fi
+cat "$HERDR_SNAPSHOT_FILE"
+"""
+
 
 def pr_json(state="OPEN", draft=False, decision="", head="abc123",
             fail=0, ok=1, comments=0):
@@ -46,9 +53,21 @@ class StatusTest(unittest.TestCase):
         with open(gh, "w") as f:
             f.write(FAKE_GH)
         os.chmod(gh, 0o755)
+        herdr = os.path.join(self.tmp, "herdr")
+        with open(herdr, "w") as f:
+            f.write(FAKE_HERDR)
+        os.chmod(herdr, 0o755)
+        self.snapshot_file = os.path.join(self.tmp, "herdr-snapshot.json")
         self.env = {**os.environ, "WORK_DIR": self.work,
                     "LINEAGE_DIR": self.lineage, "GH_BIN_PATH": gh,
-                    "GH_FIXTURES": self.fixtures}
+                    "GH_FIXTURES": self.fixtures, "HERDR_BIN_PATH": herdr,
+                    "HERDR_SNAPSHOT_FILE": self.snapshot_file}
+        self.env.pop("HERDR_PANE_ID", None)
+
+    def set_snapshot(self, agents):
+        with open(self.snapshot_file, "w") as f:
+            json.dump({"result": {"snapshot": {"agents": agents,
+                                               "workspaces": []}}}, f)
 
     def tearDown(self):
         shutil.rmtree(self.tmp)
@@ -265,6 +284,117 @@ Body prose that must survive every write.
         r = self.run_st("show", cwd=self.tmp, check=False)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("no task found", r.stderr)
+
+    def test_detect_by_coordinator(self):
+        d = self.make_task("ESHOP-8")
+        self.run_st("set-root", "coordinator=coord-x", "--dir", d)
+        self.set_snapshot([{"pane_id": "w1:p1", "name": "coord-x",
+                            "cwd": self.tmp}])
+        env = {**self.env, "HERDR_PANE_ID": "w1:p1"}
+        r = subprocess.run([STATUS, "show", "--json", "--no-live"],
+                           capture_output=True, text=True, env=env,
+                           cwd=self.tmp)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["key"], "ESHOP-8")
+        # an unnamed agent, or no herdr at all, still fails clearly
+        self.set_snapshot([{"pane_id": "w1:p1", "name": None,
+                            "cwd": self.tmp}])
+        r = subprocess.run([STATUS, "show"], capture_output=True, text=True,
+                           env=env, cwd=self.tmp)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("no task found", r.stderr)
+
+    # -------------------------------------------------- red CI vs wait
+
+    def test_red_ci_and_comments_not_hidden_behind_wait(self):
+        d = self.make_task()
+        dep = self.fixture_pr("40", state="OPEN")
+        red = self.fixture_pr("41", fail=2, comments=2)
+        self.run_st("add-row", "F", "phase=in-review", f"pr={red}",
+                    f'depends_on=[{{"pr":"{dep}","until":"merged"}}]',
+                    "--dir", d)
+        # ack with a clean PR, then the checks go red and comments arrive
+        self.fixture_pr("41", fail=0, comments=0)
+        self.run_st("ack", "F", "--dir", d)
+        self.fixture_pr("41", fail=2, comments=2)
+        data = self.show(d)
+        nxt = data["rows"][0]["next"]
+        self.assertIn("CI red (2)", nxt)
+        self.assertIn("2 new comments", nxt)
+        self.assertIn("then wait:", nxt)
+        # without urgent signals the wait stands alone
+        self.fixture_pr("41", fail=0, comments=0)
+        data = self.show(d)
+        self.assertTrue(data["rows"][0]["next"].startswith("wait:"))
+
+    # ------------------------------------------------------ show --all
+
+    def all_tasks(self, *extra):
+        r = self.run_st("show", "--all", "--json", *extra)
+        return {t["key"]: t for t in json.loads(r.stdout)["tasks"]}
+
+    def test_show_all_summarizes_and_ranks(self):
+        a = self.make_task("A-TASK")
+        red = self.fixture_pr("50", fail=1)
+        self.run_st("add-row", "X", "phase=merged", "--dir", a)
+        self.run_st("add-row", "Y", "phase=in-review", f"pr={red}", "--dir", a)
+        b = self.make_task("B-TASK")
+        self.run_st("set-root", "coordinator=coord-b", "--dir", b)
+        with open(os.path.join(self.lineage, "coord-b.json"), "w") as f:
+            json.dump({"state": "running", "summary": ""}, f)
+        self.run_st("add-row", "L", "phase=planned", "--dir", b)
+        self.run_st("add-row", "W", "phase=implementing",
+                    'depends_on=[{"id":"L","until":"merged"}]', "--dir", b)
+        tasks = self.all_tasks("--live")
+        self.assertEqual(set(tasks), {"A-TASK", "B-TASK"})
+        self.assertEqual(tasks["A-TASK"]["phases"],
+                         {"merged": 1, "in-review": 1})
+        # red CI outranks the merged row
+        self.assertEqual(tasks["A-TASK"]["urgent"]["id"], "Y")
+        self.assertIn("1 checks failing", tasks["A-TASK"]["urgent"]["next"])
+        self.assertIsNone(tasks["A-TASK"]["coordinator_state"])
+        self.assertEqual(tasks["B-TASK"]["coordinator"], "coord-b")
+        self.assertEqual(tasks["B-TASK"]["coordinator_state"], "running")
+        # a launchable row outranks a waiting one
+        self.assertEqual(tasks["B-TASK"]["urgent"]["id"], "L")
+
+    def test_show_all_local_ranks_by_snapshot(self):
+        d = self.make_task("C-TASK")
+        red = self.fixture_pr("60", fail=3)
+        self.run_st("add-row", "P", "phase=planned", "--dir", d)
+        self.run_st("add-row", "R", "phase=in-review", f"pr={red}", "--dir", d)
+        self.run_st("ack", "R", "--dir", d)
+        os.remove(os.path.join(self.fixtures, "60.json"))
+        tasks = self.all_tasks()  # no --live: must not touch gh at all
+        self.assertEqual(tasks["C-TASK"]["urgent"]["id"], "R")
+
+    # ------------------------------------------------------ workers-in
+
+    def test_workers_in(self):
+        wt = os.path.join(self.tmp, "wt-adopt")
+        os.makedirs(wt)
+        with open(os.path.join(self.lineage, "old-worker.json"), "w") as f:
+            json.dump({"state": "finished", "summary": "done",
+                       "agent": {"worktree": wt},
+                       "task": {"ref": "LEG-1#A"}}, f)
+        self.set_snapshot([
+            {"pane_id": "w2:p1", "name": "old-worker", "cwd": wt},
+            {"pane_id": "w2:p2", "name": None, "cwd": wt},
+            {"pane_id": "w3:p1", "name": "other", "cwd": self.tmp},
+        ])
+        r = self.run_st("workers-in", wt, "--json")
+        data = json.loads(r.stdout)
+        self.assertEqual(data["workers"], ["old-worker"])
+        self.assertEqual([l["name"] for l in data["lineage"]], ["old-worker"])
+        self.assertEqual([h["pane_id"] for h in data["herdr"]],
+                         ["w2:p1", "w2:p2"])
+        self.assertEqual([h["pane_id"] for h in data["unrecorded"]],
+                         ["w2:p2"])
+        # an empty worktree reports nobody and exits 0
+        empty = os.path.join(self.tmp, "wt-empty")
+        os.makedirs(empty)
+        r = self.run_st("workers-in", empty)
+        self.assertIn("nobody found", r.stdout)
 
     # -------------------------------------------------------- promote
 

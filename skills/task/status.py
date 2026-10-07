@@ -14,6 +14,16 @@ Subcommands (status.sh wraps this file):
                                  .status/ snapshots, reports, lineage, a next
                                  action per row and the consistency check.
                                  Never writes anything, not even snapshots.
+  show --all [--json] [--live]   read-only: one summary line per task under
+                                 WORK_DIR (key, title, coordinator and its
+                                 lineage state, row count by phase, most
+                                 urgent next action, ranked CI red > new
+                                 events/blocked workers > launchable >
+                                 waits). Local state only unless --live.
+  workers-in <worktree> [--json] read-only: who lives in a worktree (lineage
+                                 records whose agent.worktree matches, herdr
+                                 agents whose cwd is inside it). For adoption:
+                                 fills `workers` on adopted rows.
   add-row <id> [k=v ...]         add a deliverable row (idempotent: an
                                  existing row is updated with the given keys)
   set <id> k=v [...]             set fields on one row
@@ -33,7 +43,7 @@ task whose deliverables list the cwd's worktree or git branch.
 
 Environment: WORK_DIR (tasks root, default ~/.claude/work), LINEAGE_DIR
 (lineage records, default ~/.claude/agent-lineage), GH_BIN_PATH (the gh
-binary, default gh).
+binary, default gh), HERDR_BIN_PATH (the herdr binary, default herdr).
 """
 import datetime
 import fcntl
@@ -49,6 +59,7 @@ import time
 WORK_DIR = os.environ.get("WORK_DIR") or os.path.expanduser("~/.claude/work")
 LINEAGE_DIR = os.environ.get("LINEAGE_DIR") or os.path.expanduser("~/.claude/agent-lineage")
 GH = os.environ.get("GH_BIN_PATH") or "gh"
+HERDR = os.environ.get("HERDR_BIN_PATH") or "herdr"
 
 PHASES = ("planned", "launching", "creating-child", "implementing",
           "pr-draft", "in-review", "merged", "released", "dropped")
@@ -363,6 +374,31 @@ def all_task_dirs():
                   if is_task_dir(os.path.join(WORK_DIR, d)))
 
 
+def herdr_snapshot():
+    """The herdr snapshot, or None (no herdr, not running, bad output)."""
+    try:
+        r = subprocess.run([HERDR, "api", "snapshot"],
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode != 0:
+            return None
+        return json.loads(r.stdout)["result"]["snapshot"]
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError):
+        return None
+
+
+def calling_agent_name():
+    """The calling pane's herdr agent name, as lineage.sh resolves it:
+    HERDR_PANE_ID matched against the snapshot's agents. None outside herdr
+    or for an unnamed agent."""
+    pane = os.environ.get("HERDR_PANE_ID")
+    if not pane:
+        return None
+    snap = herdr_snapshot()
+    agent = next((a for a in (snap or {}).get("agents", [])
+                  if a.get("pane_id") == pane), None)
+    return (agent or {}).get("name")
+
+
 def git_out(args, cwd):
     r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else None
@@ -394,8 +430,17 @@ def find_task_dir(explicit):
                 return task_dir
             if branch and row.get("branch") == branch:
                 return task_dir
-    die("no task found: not inside a task directory and no deliverable "
-        f"matches this worktree or branch (tasks root: {WORK_DIR})")
+    # 3. the calling agent is some task's coordinator (its cwd need not be
+    #    the task directory, e.g. a root task coordinated from the repo)
+    name = calling_agent_name()
+    if name:
+        for task_dir in all_task_dirs():
+            front, _ = read_task(task_dir)
+            if front.get("coordinator") == name:
+                return task_dir
+    die("no task found: not inside a task directory, no deliverable matches "
+        "this worktree or branch, and no task names this agent as its "
+        f"coordinator (tasks root: {WORK_DIR})")
 
 
 def find_row(front, row_id):
@@ -584,6 +629,18 @@ def diff_events(snap, live):
     return out
 
 
+def urgent_signals(live, events):
+    """What must never be hidden behind a wait: red CI, requested changes,
+    new review comments."""
+    out = []
+    if live and live["checks"]["fail"]:
+        out.append(f"CI red ({live['checks']['fail']})")
+    if live and live["review_decision"] == "CHANGES_REQUESTED":
+        out.append("changes requested")
+    out.extend(e for e in events if "new comments" in e)
+    return out
+
+
 def next_action(row, phase, live, live_err, events, report, workers, deps_unmet, gates_pending):
     rid = row.get("id")
     if phase == "released":
@@ -595,7 +652,11 @@ def next_action(row, phase, live, live_err, events, report, workers, deps_unmet,
     if phase == "dropped":
         return "dropped"
     if deps_unmet:
-        return "wait: " + "; ".join(desc for _, desc in deps_unmet)
+        wait = "wait: " + "; ".join(desc for _, desc in deps_unmet)
+        urgent = urgent_signals(live, events)
+        if urgent:  # e.g. "CI red (2) · then wait: #8027 ..."
+            return " · ".join(urgent) + " · then " + wait
+        return wait
     if phase in ("launching", "creating-child"):
         return f"incomplete {phase}: re-run /task go {rid}"
     if phase == "planned":
@@ -699,8 +760,9 @@ def consistency(front, task_dir, rows_info):
     return findings
 
 
-def cmd_show(task_dir, as_json, no_live):
-    front, _ = read_task(task_dir)
+def collect_rows(task_dir, front, no_live):
+    """Everything show needs per row: live PR state, events, report, lineage,
+    deps, gates and the next action. Read-only."""
     rows_by_id = {str(r.get("id")): r for r in front.get("deliverables", [])}
     sha = plan_sha(front)
     cache = {}
@@ -753,7 +815,12 @@ def cmd_show(task_dir, as_json, no_live):
         info["next"] = next_action(row, phase, live, live_err, events, report,
                                    workers, deps_unmet, gates_pending)
         rows_info.append(info)
+    return sha, rows_info
 
+
+def cmd_show(task_dir, as_json, no_live):
+    front, _ = read_task(task_dir)
+    sha, rows_info = collect_rows(task_dir, front, no_live)
     findings = consistency(front, task_dir, rows_info)
     auth = front.get("authority") or {}
     result = {
@@ -809,6 +876,121 @@ def cmd_show(task_dir, as_json, no_live):
             print(f"- {f}")
     else:
         print("Consistency: ok")
+
+
+def urgency(info):
+    """Rank for --all, lower first: red CI (live, or the local snapshot),
+    new PR events or a worker blocked on the user, launchable/actionable
+    rows, waits, everything else."""
+    live = info["live"]
+    snap_pr = (info["snapshot"] or {}).get("pr") or {}
+    if ((live and live["checks"]["fail"])
+            or snap_pr.get("checks", {}).get("fail")):
+        return 0
+    if (info["events"]
+            or any(w.get("state") == "blocked-on-user" for w in info["workers"])):
+        return 1
+    if info["next"].startswith(("launch:", "round:", "gate:", "answer ",
+                                "read report", "incomplete", "PR closed")):
+        return 2
+    if info["next"].startswith("wait") or " · then wait" in info["next"]:
+        return 3
+    if info["phase"] in ("merged", "released", "dropped"):
+        return 5
+    return 4
+
+
+def cmd_show_all(as_json, live):
+    tasks = []
+    for task_dir in all_task_dirs():
+        front, _ = read_task(task_dir)
+        _, rows_info = collect_rows(task_dir, front, not live)
+        coordinator = front.get("coordinator")
+        has_coord = coordinator and coordinator != "none"
+        lin = read_lineage(coordinator) if has_coord else None
+        phases = {}
+        for info in rows_info:
+            phases[info["phase"]] = phases.get(info["phase"], 0) + 1
+        urgent = None
+        if rows_info:
+            best = min(enumerate(rows_info),
+                       key=lambda t: (urgency(t[1]), t[0]))[1]
+            urgent = {"id": best["row"].get("id"), "next": best["next"]}
+        tasks.append({
+            "dir": task_dir, "key": front.get("key"),
+            "title": front.get("title"), "coordinator": coordinator,
+            "coordinator_state": (lin or {}).get("state") if has_coord else None,
+            "phases": phases, "urgent": urgent,
+        })
+    if as_json:
+        print(json.dumps({"work_dir": WORK_DIR, "live": live, "tasks": tasks},
+                         indent=2, ensure_ascii=False))
+        return
+    headers = ("KEY", "TITLE", "COORD", "PHASES", "NEXT")
+    table = []
+    for t in tasks:
+        title = t["title"] or ""
+        if len(title) > 40:
+            title = title[:39] + "…"
+        if t["coordinator"] and t["coordinator"] != "none":
+            coord = f"{t['coordinator']}: {t['coordinator_state'] or 'no record'}"
+        else:
+            coord = "-"
+        ph = " ".join(f"{p}:{n}" for p, n in
+                      sorted(t["phases"].items(),
+                             key=lambda kv: PHASE_ORDER.get(kv[0], 99))) or "-"
+        nxt = (f"{t['urgent']['id']}: {t['urgent']['next']}" if t["urgent"]
+               else "no deliverables")
+        table.append((t["key"] or "?", title, coord, ph, nxt))
+    widths = [max(len(r[i]) for r in [headers, *table]) for i in range(5)]
+    for r in [headers, *table]:
+        print("  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip())
+    if not live:
+        print()
+        print("Local state only (snapshots, lineage); --live asks gh.")
+
+
+def cmd_workers_in(worktree, as_json):
+    wt = os.path.realpath(os.path.expanduser(worktree))
+    lineage = []
+    if os.path.isdir(LINEAGE_DIR):
+        for fn in sorted(os.listdir(LINEAGE_DIR)):
+            if not fn.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(LINEAGE_DIR, fn)) as f:
+                    rec = json.load(f)
+            except (OSError, ValueError):
+                continue
+            rec_wt = (rec.get("agent") or {}).get("worktree") or ""
+            if rec_wt and os.path.realpath(os.path.expanduser(rec_wt)) == wt:
+                lineage.append({"name": fn[:-5], "state": rec.get("state"),
+                                "ref": (rec.get("task") or {}).get("ref", "")})
+    herdr_agents = []
+    for a in (herdr_snapshot() or {}).get("agents", []):
+        cwd = a.get("cwd") or ""
+        if cwd and os.path.realpath(cwd) == wt:
+            herdr_agents.append({"name": a.get("name"),
+                                 "pane_id": a.get("pane_id")})
+    recorded = sorted(l["name"] for l in lineage)
+    unrecorded = [h for h in herdr_agents if h["name"] not in recorded]
+    result = {"worktree": wt, "workers": recorded, "lineage": lineage,
+              "herdr": herdr_agents, "unrecorded": unrecorded}
+    if as_json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+    if not lineage and not herdr_agents:
+        print(f"nobody found in {wt}")
+        return
+    for l in lineage:
+        print(f"lineage: {l['name']} ({l['state']}, ref {l['ref'] or 'none'})")
+    for h in herdr_agents:
+        print(f"herdr: {h['name'] or '(unnamed)'} in pane {h['pane_id']}")
+    print(f"workers value: {json.dumps(recorded)}")
+    for h in unrecorded:
+        who = f" ({h['name']})" if h["name"] else ""
+        print(f"unrecorded agent in pane {h['pane_id']}{who}: name it and "
+              f"record it (lineage.sh launch) before adding it to workers")
 
 
 # ------------------------------------------------------------------ writes
@@ -964,7 +1146,7 @@ def cmd_gate(task_dir, row_id, gate_name, verdict):
 def main():
     args = sys.argv[1:]
     explicit_dir = None
-    as_json = no_live = False
+    as_json = no_live = show_all = live = False
     rest = []
     i = 0
     while i < len(args):
@@ -976,13 +1158,29 @@ def main():
             as_json, i = True, i + 1
         elif args[i] == "--no-live":
             no_live, i = True, i + 1
+        elif args[i] == "--all":
+            show_all, i = True, i + 1
+        elif args[i] == "--live":
+            live, i = True, i + 1
         else:
             rest.append(args[i])
             i += 1
     if not rest:
-        die("usage: status.sh show|add-row|set|set-root|promote|ack|gate ... "
-            "(see the header of status.py)")
+        die("usage: status.sh show|workers-in|add-row|set|set-root|promote|"
+            "ack|gate ... (see the header of status.py)")
     cmd, args = rest[0], rest[1:]
+    if show_all and cmd != "show":
+        die("--all only applies to show")
+    if cmd == "show" and show_all:
+        if args:
+            die("show takes no positional arguments")
+        cmd_show_all(as_json, live)
+        return
+    if cmd == "workers-in":
+        if len(args) != 1:
+            die("workers-in needs exactly a worktree path")
+        cmd_workers_in(args[0], as_json)
+        return
     task_dir = find_task_dir(explicit_dir)
     if cmd == "show":
         if args:
