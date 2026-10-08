@@ -190,9 +190,18 @@ from this file.
    workspaces, find the one whose cwd is the worktree path, list its panes).
 4. **Start the agent** in that pane per the `herdr` skill (`agent start` with
    `--kind claude` and a meaningful unique name; wait until it is idle).
-5. **Prompt it** with the task (or "read HANDOFF.md and do what it says"),
+5. **Record its lineage** so asagents shows it under this session and with
+   its task, right after `agent start`:
+   `aswork-lineage launch <name> --pane <pane id> --worktree <worktree path>
+   --kind ticket|pr|task|other --ref <ticket key, PR url or slug> --title
+   "<one line>"`. Skip only when this session itself is not in herdr
+   (`HERDR_PANE_ID` unset; the command refuses to run there). The
+   `aswork:worker` skill already does this for its own launches; every other
+   agent started from this skill gets recorded here, or it shows up in
+   asagents as a loose root with no task.
+6. **Prompt it** with the task (or "read HANDOFF.md and do what it says"),
    per the `herdr` skill.
-6. **Report to the user** in your final message: workspace, pane, agent name,
+7. **Report to the user** in your final message: workspace, pane, agent name,
    worktree path, and what the agent was told. If the user asked for the agent
    to report back, keep a background watcher per the `herdr` skill and relay
    the result; otherwise stop here.
