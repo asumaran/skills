@@ -157,6 +157,30 @@ Close with a one-line reminder that the user curates: nothing gets posted
 anywhere by this skill. If context gaps limited the analysis (Step 2), add
 one line naming them and what to connect.
 
+## Step 5 — Keep the context alive
+
+The context file must improve with use or the lens goes stale. After the
+output — and whenever the user corrects you mid-conversation — check whether
+this run surfaced a durable company fact the context file lacks or
+contradicts: a correction from the user, something learned from tickets, PRs
+or customer signals, or feedback that an insight landed (or flopped) when the
+user raised it with the team (that one feeds the "Questions that land"
+section).
+
+When there is one, propose the concrete edit (quote the exact line you would
+add or change, in the file's language) via AskUserQuestion. On approval,
+apply it to `~/.claude/product-context/<company>.md` and commit and push in
+the private repo the file lives in (the directory is a symlink; resolve the
+real path). Conventional commit, scoped to the company, e.g.
+`feat(syftdata): record customer demand for multi-source signals`. The
+user's approval of the edit covers that commit and push.
+
+Same boundaries as the file itself: durable facts about the company and its
+product only — never meeting logistics, personal notes, or anything
+sensitive. Skip the step silently when the run produced nothing worth
+keeping. The `product-context` skill does the same capture outside a
+product-lens run.
+
 ## Hard rules
 
 - Never post, comment, or edit anything outside the conversation.
