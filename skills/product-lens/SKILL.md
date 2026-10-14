@@ -1,6 +1,7 @@
 ---
 name: product-lens
 description: Review an artifact of the user's own work (a ticket, a plan, a PR, a code review, or free text) through the eyes of an experienced product person and return a short, curated list of candidate product insights. Use when the user says "product-lens", asks what a product person would think of something, asks for the product angle on a ticket/plan/PR/review, or asks whether something is worth raising with the team.
+argument-hint: "[ticket <KEY> | pr <number> | plan <path> | review <path> | free text]"
 ---
 
 # Product lens
@@ -90,6 +91,13 @@ artifact alone. In rough order of value:
 Scale the digging to the artifact: a one-line ticket may deserve more
 surrounding research than a self-contained plan. Stay a product reader, not a
 code reviewer.
+
+When the sweep is broad (several PRs, many files, a long ticket history),
+delegate the gathering to an Explore subagent and keep only its conclusions:
+brief it with what the artifact is about and exactly what to look for (prior
+attempts, user-visible behavior, related discussions), so the raw file and PR
+dumps stay out of the main context. The product judgment in Step 3 always
+happens here, never in the subagent.
 
 If a source would clearly have improved the analysis but is not available in
 the session (no issue-tracker MCP, no access to customer channels, etc.), do
