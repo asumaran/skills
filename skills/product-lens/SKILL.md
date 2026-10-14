@@ -125,7 +125,21 @@ answer.
 
 ## Step 4 — Output
 
-Return **3–5 candidate insights maximum**, each in this shape:
+Write the entire output in the language of the conversation with the user —
+section labels included. The shapes below are templates, not literal strings
+to copy; translate them.
+
+Open with a scan block so the user can tell in five seconds whether there is
+anything worth their attention, before the dense part:
+
+```
+**Scan:** <one line of overall takeaway>
+1. <short title> — worth communicating? yes/maybe/no
+2. <short title> — worth communicating? yes/maybe/no
+```
+
+Then the full detail. Return **3–5 candidate insights maximum**, each in this
+shape:
 
 ```
 ### <short title>
