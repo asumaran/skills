@@ -11,6 +11,10 @@ is the filter: they only communicate what they can defend without an AI in
 front of them. Teaching the lens matters as much as the insights themselves,
 so every insight must show the question that produced it.
 
+The skill is company-agnostic by design: it must work the same at any employer
+or personal project. Everything company-specific comes from the context file
+in Step 1; nothing about a particular company may ever be hardcoded here.
+
 **This skill never communicates anything on the user's behalf.** No PR
 comments, no ticket comments, no Slack messages, no edits to the artifact.
 The only output is the analysis in the conversation.
@@ -64,12 +68,33 @@ are required; use whatever is there):
 - **Questions that land** — product questions that have worked before.
 - **Glossary** — internal terms a reviewer must not misread.
 
-## Step 2 — Fetch and understand the artifact
+## Step 2 — Fetch the artifact and gather context
 
-Pull the artifact with the table above. Then research the surroundings **only
-as far as the artifact demands**: a ticket may need a quick look at the code
-it touches, a PR may need its linked ticket, a plan may need none of that.
-This is a product read, not a code review; do not audit the implementation.
+Pull the artifact with the table above. Then feed on every context source the
+session actually has access to — good insights come from context, not from the
+artifact alone. In rough order of value:
+
+- **The artifact's own trail**: linked tickets, parent/child issues, PR
+  comments and review threads, the ticket's discussion.
+- **Related history**: search the issue tracker for earlier tickets about the
+  same feature or component (e.g. Linear MCP `list_issues` with a query);
+  past PRs touching the same area (`gh pr list --search`, `git log` on the
+  affected paths). What was tried before and why it changed is often where
+  the insight lives.
+- **The code and product surface** the artifact touches: enough to understand
+  what the user-visible behavior becomes, not to audit the implementation.
+- **Customer signals**, when the session has them connected: support or
+  feedback threads (Slack, email, meeting notes) that mention the feature.
+  Read-only, and only what is relevant to this artifact.
+
+Scale the digging to the artifact: a one-line ticket may deserve more
+surrounding research than a self-contained plan. Stay a product reader, not a
+code reviewer.
+
+If a source would clearly have improved the analysis but is not available in
+the session (no issue-tracker MCP, no access to customer channels, etc.), do
+not fake it or silently skip it: name the gap in the output's closing line and
+suggest what to connect for next time.
 
 ## Step 3 — Apply the lens
 
@@ -107,7 +132,8 @@ Return **3–5 candidate insights maximum**, each in this shape:
 ```
 
 Close with a one-line reminder that the user curates: nothing gets posted
-anywhere by this skill.
+anywhere by this skill. If context gaps limited the analysis (Step 2), add
+one line naming them and what to connect.
 
 ## Hard rules
 
