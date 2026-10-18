@@ -188,8 +188,18 @@ from this file.
    this whole sequence.
 3. **Locate the workspace's shell pane** per the `herdr` skill (list
    workspaces, find the one whose cwd is the worktree path, list its panes).
-4. **Start the agent** in that pane per the `herdr` skill (`agent start` with
-   `--kind claude` and a meaningful unique name; wait until it is idle).
+4. **Inject the account, then start the agent.** The pane's shell inherits
+   the herdr server's environment, not this session's, so without this the
+   new Claude silently runs on the personal account. Resolve this session's
+   account (`ACCOUNT_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"`) and inject
+   it **always explicitly, personal included** (a reused pane may carry an
+   older export): `herdr pane run <pane> "export
+   CLAUDE_CONFIG_DIR=$ACCOUNT_DIR"` into the idle shell (or `--env
+   CLAUDE_CONFIG_DIR=$ACCOUNT_DIR` when this flow creates the pane itself).
+   Never inject tokens; the user's `claude()` zsh function derives gateway
+   auth from the config dir. Then start the agent in that pane per the
+   `herdr` skill (`agent start` with `--kind claude` and a meaningful
+   unique name; wait until it is idle).
 5. **Record its lineage** so asagents shows it under this session and with
    its task, right after `agent start`:
    `aswork-lineage launch <name> --pane <pane id> --worktree <worktree path>
