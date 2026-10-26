@@ -181,10 +181,10 @@ from this file.
    manually. Note the `--cwd` quirk above if you ever must open it yourself.
 2. **Write the handoff** before starting the agent (see the checklist below).
    Short context can go inline in the prompt. Anything longer goes in
-   `HANDOFF.md` at the worktree root, written with the `aswork:handoff` skill
+   `HANDOFF.md` at the worktree root, written with the `aw:handoff` skill
    (from the aswork plugin; pass the worktree path; it keeps the file
    untracked and excluded), and the prompt tells the agent to read it first
-   and never to commit it. For a ticket or PR, the `aswork:worker` skill runs
+   and never to commit it. For a ticket or PR, the `aw:worker` skill runs
    this whole sequence.
 3. **Locate the workspace's shell pane** per the `herdr` skill (list
    workspaces, find the one whose cwd is the worktree path, list its panes).
@@ -206,7 +206,7 @@ from this file.
    --kind ticket|pr|task|other --ref <ticket key, PR url or slug> --title
    "<one line>"`. Skip only when this session itself is not in herdr
    (`HERDR_PANE_ID` unset; the command refuses to run there). The
-   `aswork:worker` skill already does this for its own launches; every other
+   `aw:worker` skill already does this for its own launches; every other
    agent started from this skill gets recorded here, or it shows up in
    asagents as a loose root with no task.
 6. **Prompt it** with the task (or "read HANDOFF.md and do what it says"),
