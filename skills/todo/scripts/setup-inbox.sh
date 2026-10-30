@@ -72,8 +72,10 @@ here and closes the issue when it merges. `/todo done <n>` closes by hand.
 Personal repo. Items from work accounts carry pointers (ticket keys, PR URLs,
 paths), never customer data, secrets or internal documents.
 MD
-sha="$(gh api "repos/$REPO/contents/README.md" -q .sha 2>/dev/null || true)"
-if [[ -z "$sha" ]]; then
+# gh prints the error body on stdout too, so only a successful call yields a sha.
+if gh api "repos/$REPO/contents/README.md" >/dev/null 2>&1; then
+  echo "README.md (already)"
+else
   gh api --method PUT "repos/$REPO/contents/README.md" \
     -f message="docs: inbox format and labels" \
     -f content="$(base64 < "$readme" | tr -d '\n')" >/dev/null
