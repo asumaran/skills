@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# ghp stub for work.bats: logs every call (and the text of a --body-file) to
+# $GHP_LOG. Fails unless GHP_STUB_LIVE=1; then `issue view` prints
+# $GHP_STUB_VIEW, `issue edit` and `issue comment` succeed, and Project calls
+# fail (the board is unreachable, which work.sh only reports).
+printf '%s\n' "$*" >>"$GHP_LOG"
+[[ "${GHP_STUB_LIVE:-0}" == 1 ]] || exit 1
+case "$1 $2" in
+  "issue view") cat "$GHP_STUB_VIEW" ;;
+  "issue edit") ;;
+  "issue comment")
+    while (($#)); do
+      [[ "$1" == --body-file ]] && printf 'BODY: %s\n' "$(cat "$2")" >>"$GHP_LOG"
+      shift
+    done ;;
+  *) exit 1 ;;
+esac

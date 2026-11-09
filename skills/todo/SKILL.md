@@ -12,8 +12,11 @@ Claude needs to pick it up, and labels that say where it is worked.
 `gh` may have a work login active (`gh auth status` lists several). The
 inbox always goes through the personal one: run **every** inbox call in this
 skill with `ghp` (`gh` as the `asumaran` login, installed by the dotfiles
-`claude-code` module) instead of `gh`. Where `ghp` is missing, prefix `gh`
-with `GH_TOKEN="$(gh auth token --user asumaran)"`.
+`claude-code` module) instead of `gh`. Where `ghp` is missing, the prose
+modes (add, list, done) can prefix `gh` with
+`GH_TOKEN="$(gh auth token --user asumaran)"`; the launcher `scripts/work.sh`
+has no fallback and needs `ghp` (only a dry run fed by `--issue-json` works
+without it).
 
 Labels:
 
@@ -24,6 +27,7 @@ Labels:
 | `repo:<name>` | The repo it belongs to (bare name, e.g. `repo:monorepo-front`); created on demand |
 | `ready` | The user approved it: the launcher (`scripts/work.sh`, run by `/todo work` or by inbox-agent's dispatch) may start a worker on it without asking. Marking it `ready` is also the user's permission for that worker to commit on the item's branch |
 | `in-progress` | A worker has it: set by `work.sh` when it launches (it removes `ready`), removed by the worker when it blocks |
+| `large` | Several PRs or repos, needs a plan: `work.sh` refuses it with exit 4 and it goes to `/aw:new`. Set by inbox-agent's triage or by hand |
 
 The board is GitHub Project #5 "Inbox"; its `Status` field is the one view
 of where each item stands:
@@ -153,20 +157,43 @@ inbox-agent's dispatch uses. Do not redo its steps by hand.
    ~/.claude/skills/todo/scripts/work.sh <n> --dry-run   # prints, writes nothing
    ~/.claude/skills/todo/scripts/work.sh <n>
    ```
-   It resolves the account (`account:<x>`, default personal) and the repo
-   (Origin `checkout:`, else `repo:<name>` under `~/Developer` or the
-   projects map), branches `inbox-<n>-<slug>` from `origin/<default
-   branch>`, creates the worktree with `wt`, writes `HANDOFF.md` from
-   `templates/HANDOFF.md` (issue verbatim, comments, repo rules, the
-   worker's Authority; excluded from git), injects the item's
-   `CLAUDE_CONFIG_DIR` into a free pane of the worktree's herdr workspace,
-   reserves the item (`in-progress`, `ready` removed, "Picked up" comment,
-   Status En progreso), starts `wk_inbox<n>` with `--permission-mode
-   auto`, records its lineage (`inbox#<n>`) and sends the boot prompt. A
-   failed start reverts the reservation.
-   Exit codes: `3` no repo, `4` no done-when (both: go Large or fix the
-   issue), `5` herdr not reachable (nothing changed), `6` closed or
-   already in-progress, `1` other errors (the message says what was left).
+   It refuses a `large` item, resolves the account (`account:<x>`, default
+   personal) and the repo (Origin `checkout:`, else `repo:<name>` under
+   `~/Developer` or the projects map), needs a done-when criterion (a line
+   starting with "Done when" in the body or a comment, with at least one
+   word after it), checks that no agent `wk_inbox<n>` exists and that the
+   repo does not track a root `HANDOFF.md`, branches `inbox-<n>-<slug>`
+   from `origin/<default branch>`, creates the worktree with `wt`, writes
+   `HANDOFF.md` from `templates/HANDOFF.md` (issue text fenced as untrusted
+   data, repo rules, the worker's Authority; excluded from git), injects
+   the item's `CLAUDE_CONFIG_DIR` into a free pane of the worktree's herdr
+   workspace, re-reads the issue and reserves it (`in-progress`, `ready`
+   removed, "Picked up" comment, Status En progreso), starts `wk_inbox<n>`
+   with `--permission-mode auto`, records its lineage (`inbox#<n>`) and
+   sends the boot prompt. A failed start or an interrupted launcher
+   reverts the reservation, unless the start failed because another launch
+   already owns `wk_inbox<n>`.
+
+   Dry run: `--dry-run` resolves and prints everything (also the rendered
+   `HANDOFF.md`) and applies exit codes 3/4/6 as a real run, but writes
+   nothing: no fetch, branch, worktree, HANDOFF, GitHub write or pane; the
+   only disk effect is a temp dir under `mktemp`, removed on exit. With
+   `--set-status` it prints the Status it would set and exits 0.
+
+   Exit codes (same list in the header of `work.sh`):
+
+   ```
+   0  launched, or a dry run printed
+   1  error; after the reservation it is reverted, except a failed boot prompt (the agent is alive, the item stays in-progress)
+   2  usage
+   3  no repo resolved -> Para ti
+   4  needs /aw:new: label `large`, or no done-when criterion -> Para ti
+   5  herdr not reachable: nothing written, the item stays ready
+   6  not launchable: closed, already in-progress, agent wk_inbox<n> exists, or the repo tracks a root HANDOFF.md
+   ```
+
+   For `/todo work`: on 3 or 4 go Large or fix the issue; on 5 nothing
+   changed; on 1 the message says what was left.
 4. Report what it printed (workspace, pane, agent, worktree, account), one
    line each. The worker ends with a single question (merge to main for
    `asumaran` repos, a draft PR elsewhere) or, if blocked, moves the item

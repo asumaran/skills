@@ -1,0 +1,30 @@
+{
+  "number": 77,
+  "title": "Fix the flaky login test",
+  "url": "https://github.com/asumaran/inbox/issues/77",
+  "state": "OPEN",
+  "projectItems": [
+    {
+      "title": "Inbox",
+      "status": {
+        "name": "Hoy"
+      }
+    }
+  ],
+  "labels": [
+    {
+      "name": "account:personal"
+    },
+    {
+      "name": "org:personal"
+    },
+    {
+      "name": "repo:handoffrepo"
+    },
+    {
+      "name": "ready"
+    }
+  ],
+  "body": "Fix it.\n\n## Context\n- Done when: the login test passes ten runs in a row\n\n## Origin\n- account: personal\n- checkout: none",
+  "comments": []
+}
