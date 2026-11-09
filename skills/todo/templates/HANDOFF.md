@@ -70,16 +70,23 @@ No questions half way. Either you finish (below) or you block (below).
 ## Finish
 
 1. The done-when holds and the repo's checks pass on your last commit.
-2. ONE question with `AskUserQuestion`, recommended option first:
+2. ONE question with `AskUserQuestion`, recommended option first. The user
+   jumps between many contexts: open with one line on where this is (inbox
+   #{{NUMBER}}, {{REPO_SLUG}}, what you changed), then the decision:
    {{FINISH_QUESTION}}
+   Each option says what happens if chosen (yes: {{FINISH_ACTION}} No: the
+   branch stays as is and the item goes to Para ti).
 3. On yes: {{FINISH_ACTION}}
 4. Comment the result on the item (commit SHA or PR URL, one line on what
-   changed) with `--body-file`. Close it when the work is merged:
-   `ghp issue close {{NUMBER}} -R asumaran/inbox`, then
-   `--set-status "Hecho"`. A draft PR is not merged: leave the item open
-   with the PR URL commented; the inbox triage closes it with the merged PR
-   as evidence.
-5. On no: leave the branch as is, comment where it stands, stop.
+   changed) with `--body-file`. Merged: `ghp issue close {{NUMBER}} -R
+   asumaran/inbox`, then `--set-status "Hecho"`. A draft PR is not merged:
+   leave the item open with the PR URL commented, remove `in-progress`
+   (`ghp issue edit {{NUMBER}} -R asumaran/inbox --remove-label
+   in-progress`) and `--set-status "Para ti"` (the PR waits on the user);
+   the inbox triage closes it with the merged PR as evidence.
+5. On no: comment where the branch stands, remove `in-progress` and
+   `--set-status "Para ti"` as above, then stop. Never leave the item
+   `in-progress` once you stop.
 
 ## If you get blocked
 

@@ -61,6 +61,9 @@ PROJECT_OWNER=asumaran
 PROJECT_NUMBER=5
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+# The path the worker calls later: the installed copy outlives a dev checkout.
+INSTALLED="$HOME/.claude/skills/todo/scripts/work.sh"
+WORK_SH="$SELF"; [[ -x "$INSTALLED" ]] && WORK_SH="$INSTALLED"
 TEMPLATE="$SCRIPT_DIR/../templates/HANDOFF.md"
 
 die()  { local code=$1; shift; printf 'work.sh: %s\n' "$*" >&2; exit "$code"; }
@@ -124,7 +127,9 @@ trap 'rm -rf "$TMP"' EXIT
 if [[ -n "$ISSUE_JSON_FILE" ]]; then
   cp "$ISSUE_JSON_FILE" "$TMP/issue.json"
 else
-  ghp issue view "$N" -R "$INBOX" --json number,title,body,labels,url,comments,state,projectItems >"$TMP/issue.json" \
+  # projectItems needs the read:project scope: without it, read the rest.
+  ghp issue view "$N" -R "$INBOX" --json number,title,body,labels,url,comments,state,projectItems >"$TMP/issue.json" 2>/dev/null \
+    || ghp issue view "$N" -R "$INBOX" --json number,title,body,labels,url,comments,state >"$TMP/issue.json" \
     || die 1 "could not read inbox #$N"
 fi
 J="$TMP/issue.json"
@@ -174,7 +179,7 @@ fi
 if [[ -z "$REPO" ]]; then
   die 3 "inbox #$N has no repo to work in (repo label: ${REPO_NAME:-none}, checkout: ${CHECKOUT:-none}): needs /aw:new or is not repo work"
 fi
-REPO_SLUG="$(git -C "$REPO" remote get-url origin 2>/dev/null | sed -E 's#^(git@[^:]+:|https?://[^/]+/)##; s#\.git$##')" || REPO_SLUG=""
+REPO_SLUG="$(git -C "$REPO" remote get-url origin 2>/dev/null | sed -E 's#^(git@[^:]+:|ssh://[^/]+/|https?://[^/]+/)##; s#\.git$##')" || REPO_SLUG=""
 REPO_OWNER="${REPO_SLUG%%/*}"
 
 # A done-when: "Done when" in the body (capture format, pulse Origin) or in a
@@ -236,7 +241,7 @@ render_handoff() {
   TPL_NUMBER="$N" TPL_TITLE="$TITLE" TPL_URL="$URL" TPL_DATE="$(date +%F)" \
   TPL_AGENT="$AGENT" TPL_WORKTREE="$WORKTREE" TPL_BRANCH="$BRANCH" \
   TPL_DEFAULT_BRANCH="$DEFAULT_BRANCH" TPL_REPO="$REPO" TPL_REPO_SLUG="${REPO_SLUG:-unknown}" \
-  TPL_ACCOUNT="$ACCOUNT" TPL_ACCOUNT_DIR="$ACCOUNT_DIR" TPL_WORK_SH="$SELF" \
+  TPL_ACCOUNT="$ACCOUNT" TPL_ACCOUNT_DIR="$ACCOUNT_DIR" TPL_WORK_SH="$WORK_SH" \
   TPL_FIRST_ACTION="$FIRST_ACTION" TPL_FINISH_QUESTION="$FINISH_QUESTION" TPL_FINISH_ACTION="$FINISH_ACTION" \
   python3 -I -c '
 import json, os, re, sys
@@ -310,6 +315,7 @@ git -C "$REPO" fetch origin --quiet || die 1 "git fetch origin failed in $REPO"
 if ! git -C "$REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; then
   git -C "$REPO" branch --no-track "$BRANCH" "origin/$DEFAULT_BRANCH" || die 1 "could not create $BRANCH"
 fi
+WT_WAS_NEW=1; [[ -d "$WORKTREE" ]] && WT_WAS_NEW=0
 (cd "$REPO" && wt new "$BRANCH" -e none -t </dev/null) || die 1 "wt new $BRANCH failed in $REPO (a dirty main checkout makes wt ask: run it by hand once)"
 WORKTREE="$(cd "$REPO" && wt path "$BRANCH")"
 [[ -d "$WORKTREE" ]] || die 1 "worktree $WORKTREE was not created"
@@ -317,7 +323,11 @@ WORKTREE="$(cd "$REPO" && wt path "$BRANCH")"
 render_handoff >"$WORKTREE/HANDOFF.md"
 EXCLUDE="$(git -C "$WORKTREE" rev-parse --path-format=absolute --git-path info/exclude)"
 mkdir -p "$(dirname "$EXCLUDE")"
-grep -qxF HANDOFF.md "$EXCLUDE" 2>/dev/null || printf 'HANDOFF.md\n' >>"$EXCLUDE"
+# Anchored: only the worktree root's HANDOFF.md, never a tracked one deeper.
+if grep -qxF HANDOFF.md "$EXCLUDE" 2>/dev/null; then
+  sed -i.bak 's#^HANDOFF\.md$#/HANDOFF.md#' "$EXCLUDE" && rm -f "$EXCLUDE.bak"
+fi
+grep -qxF /HANDOFF.md "$EXCLUDE" 2>/dev/null || printf '/HANDOFF.md\n' >>"$EXCLUDE"
 
 find_ws() { herdr workspace list 2>/dev/null | jq -r --arg w "$WORKTREE" '.result.workspaces[]? | select(.worktree.checkout_path==$w) | .workspace_id' | head -1; }
 WS="$(find_ws)"
@@ -327,8 +337,13 @@ if [[ -z "$WS" ]]; then
 fi
 [[ -n "$WS" ]] || die 1 "no herdr workspace for $WORKTREE"
 
-PANE="$(herdr pane list --workspace "$WS" 2>/dev/null \
-  | jq -r --arg w "$WORKTREE" '.result.panes[]? | select((.agent // null) == null and .cwd == $w) | .pane_id' | head -1)" || PANE=""
+# Reuse only the root shell of a workspace wt just created; a reused worktree
+# may have panes running editors or servers, so it gets a new tab instead.
+PANE=""
+if ((WT_WAS_NEW)); then
+  PANE="$(herdr pane list --workspace "$WS" 2>/dev/null \
+    | jq -r --arg w "$WORKTREE" '.result.panes[]? | select((.agent // null) == null and .cwd == $w) | .pane_id' | head -1)" || PANE=""
+fi
 if [[ -z "$PANE" ]]; then
   PANE="$(herdr tab create --workspace "$WS" --cwd "$WORKTREE" --label "Inbox #$N" --env "CLAUDE_CONFIG_DIR=$ACCOUNT_DIR" 2>/dev/null \
     | jq -r '.result.root_pane.pane_id // empty')" || PANE=""
@@ -344,6 +359,15 @@ herdr pane wait-output "$PANE" --match "work-sh-$TOKEN" --timeout 15000 >/dev/nu
   || die 1 "pane $PANE did not return to its prompt"
 
 # --- 5. Reserve -------------------------------------------------------------------
+# Last look before writing: another launch may have taken the item meanwhile
+# (wt setup scripts can take minutes), and the agent name must be free so a
+# failed start below always means OUR start failed.
+if herdr agent get "$AGENT" >/dev/null 2>&1; then
+  die 6 "an agent named $AGENT already exists: inbox #$N is being worked"
+fi
+if ghp issue view "$N" -R "$INBOX" --json labels -q '[.labels[].name] | index("in-progress") != null' 2>/dev/null | grep -qx true; then
+  die 6 "inbox #$N became in-progress while launching: another launch has it"
+fi
 reserve_edit=(--add-label in-progress); ((HAD_READY)) && reserve_edit+=(--remove-label ready)
 ghp issue edit "$N" -R "$INBOX" "${reserve_edit[@]}" >/dev/null || die 1 "could not label inbox #$N in-progress"
 printf 'Picked up: %s, %s account (agent %s).\n' "$WORKTREE" "$ACCOUNT" "$AGENT" >"$TMP/picked.md"
@@ -356,7 +380,8 @@ revert() {
   ghp issue edit "$N" -R "$INBOX" "${undo[@]}" >/dev/null || warn "revert: could not restore the labels of inbox #$N"
   printf 'Launch failed, item left as it was: %s\n' "$why" >"$TMP/failed.md"
   ghp issue comment "$N" -R "$INBOX" --body-file "$TMP/failed.md" >/dev/null || warn "revert: could not comment on inbox #$N"
-  [[ -n "$PRIOR_STATUS" ]] && project_set_status "$N" "$PRIOR_STATUS"
+  local back="$PRIOR_STATUS"; [[ -n "$back" ]] || { ((HAD_READY)) && back=Hoy || back=Inbox; }
+  project_set_status "$N" "$back"
   die 1 "$why (reverted)"
 }
 
