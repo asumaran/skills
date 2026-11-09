@@ -171,8 +171,10 @@ inbox-agent's dispatch uses. Do not redo its steps by hand.
    removed, "Picked up" comment, Status En progreso), starts `wk_inbox<n>`
    with `--permission-mode auto`, records its lineage (`inbox#<n>`) and
    sends the boot prompt. A failed start or an interrupted launcher
-   reverts the reservation, unless the start failed because another launch
-   already owns `wk_inbox<n>`.
+   reverts the reservation, with two exceptions: the start failed because
+   another launch already owns `wk_inbox<n>` (exit 6), or the launcher was
+   interrupted after the agent appeared (the reservation stays, exit 1, the
+   message names the pane to check).
 
    Dry run: `--dry-run` resolves and prints everything (also the rendered
    `HANDOFF.md`) and applies exit codes 3/4/6 as a real run, but writes
@@ -184,7 +186,7 @@ inbox-agent's dispatch uses. Do not redo its steps by hand.
 
    ```
    0  launched, or a dry run printed
-   1  error; after the reservation it is reverted, except a failed boot prompt (the agent is alive, the item stays in-progress)
+   1  error; after the reservation it is reverted, except a failed boot prompt (the agent is alive, the item stays in-progress) or an interrupt after the agent appeared (the reservation stays, the message names the pane)
    2  usage
    3  no repo resolved -> Para ti
    4  needs /aw:new: label `large`, or no done-when criterion -> Para ti

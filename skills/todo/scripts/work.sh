@@ -62,7 +62,7 @@
 #
 # Exit codes (dispatch.sh contract; same list in SKILL.md):
 #   0  launched, or a dry run printed
-#   1  error; after the reservation it is reverted, except a failed boot prompt (the agent is alive, the item stays in-progress)
+#   1  error; after the reservation it is reverted, except a failed boot prompt (the agent is alive, the item stays in-progress) or an interrupt after the agent appeared (the reservation stays, the message names the pane)
 #   2  usage
 #   3  no repo resolved -> Para ti
 #   4  needs /aw:new: label `large`, or no done-when criterion -> Para ti
@@ -545,9 +545,11 @@ if ! herdr agent start "$AGENT" --kind claude --pane "$PANE" -- "${CLAUDE_ARGS[@
   start_err="$(tr '\n' ' ' <"$TMP/start.json" | cut -c1-300)"
   # The name is taken: another launch owns the item and its worker is live.
   # Releasing the reservation now would make a live worker's issue dispatchable.
-  # Only herdr's own message counts: an agent that exists now may be this
-  # launch's half-started one, which must be reverted like any failure.
-  if grep -qiE 'already (exists|in use|taken|registered)' "$TMP/start.json"; then
+  # Only a line that names the agent and says it is taken counts: an agent
+  # that exists now may be this launch's half-started one, and "pane p1
+  # already in use" is a pane failure; both revert like any other failure.
+  if grep -E "(^|[^A-Za-z0-9_])$AGENT([^A-Za-z0-9_]|\$)" "$TMP/start.json" \
+      | grep -qiE 'already (exists|in use|taken|registered)'; then
     trap - INT TERM ERR
     die 6 "agent $AGENT already exists (another launch owns inbox #$N); reservation left to it: $start_err"
   fi

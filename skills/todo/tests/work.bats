@@ -403,3 +403,11 @@ EXPECTED_HEADINGS='# HANDOFF: inbox #77
   [ "$(cat "$HOME/$WT_PATH_SUFFIX/HANDOFF.md")" == real ]
   assert_no_github
 }
+
+@test "a start failure about the pane (not the agent name) reverts" {
+  HERDR_STUB_START=pane-busy live ok
+  [ "$status" -eq 1 ]
+  logged "$RESERVE"
+  logged "$REVERT_READY"
+  [[ "$output" == *"(reverted)"* ]]
+}

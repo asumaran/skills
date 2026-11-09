@@ -4,7 +4,8 @@
 # HERDR_STUB_AGENTS. The workspace and pane of the launch are at
 # $HERDR_STUB_WT. `agent start` follows HERDR_STUB_START: ok, fail, exists
 # (the name is taken), term (the launcher gets SIGTERM meanwhile),
-# term-started (the agent appears, then the launcher gets SIGTERM).
+# term-started (the agent appears, then the launcher gets SIGTERM),
+# pane-busy (a pane error worded like a taken name, without the agent's name).
 printf '%s\n' "$*" >>"$HERDR_LOG"
 [[ "${HERDR_STUB_REACHABLE:-0}" == 1 ]] || exit 1
 case "$1 $2" in
@@ -23,6 +24,7 @@ case "$1 $2" in
         [[ "${HERDR_STUB_AGENTS_AFTER:-0}" == 1 ]] && touch "$HERDR_LOG.started-$3"
         echo "error: pane p1 is not at a shell prompt"; exit 1 ;;
       exists) echo "error: agent name $3 already exists"; exit 1 ;;
+      pane-busy) echo "error: pane p1 already in use"; exit 1 ;;
       term) kill -TERM "$PPID"; exit 1 ;;
       term-started) touch "$HERDR_LOG.started-$3"; kill -TERM "$PPID"; exit 1 ;;
     esac ;;
