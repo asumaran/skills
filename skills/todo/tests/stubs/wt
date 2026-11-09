@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# wt stub for work.bats: `path` like the real one (under $HOME/wt); `new` adds
+# a plain git worktree of the existing branch.
+p="$HOME/wt/$(basename "$PWD")/$2"
+case "$1" in
+  path) printf '%s\n' "$p" ;;
+  new) [[ -d "$p" ]] || git worktree add -q "$p" "$2" ;;
+  *) echo "wt stub: unexpected call: $*" >&2; exit 99 ;;
+esac

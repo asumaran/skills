@@ -10,29 +10,46 @@ The issue is the whole record: title, the user's words, the context a fresh
 Claude needs to pick it up, and labels that say where it is worked.
 
 `gh` may have a work login active (`gh auth status` lists several). The
-inbox always goes through the personal one, so prefix **every** `gh` call in
-this skill with:
-
-```bash
-GH_TOKEN="$(gh auth token --user asumaran)"
-```
+inbox always goes through the personal one: run **every** inbox call in this
+skill with `ghp` (`gh` as the `asumaran` login, installed by the dotfiles
+`claude-code` module) instead of `gh`. Where `ghp` is missing, the prose
+modes (add, list, done) can prefix `gh` with
+`GH_TOKEN="$(gh auth token --user asumaran)"`; the launcher `scripts/work.sh`
+has no fallback and needs `ghp` (only a dry run fed by `--issue-json` works
+without it).
 
 Labels:
 
 | Label | Meaning |
 |---|---|
 | `account:personal` / `account:syft` / `account:mas` | Which Claude works it: `~/.claude`, `~/.claude-syft`, `~/.claude-mas` |
+| `org:masorange` / `org:syft` / `org:personal` | Which organization it belongs to (filter the inbox by company) |
 | `repo:<name>` | The repo it belongs to (bare name, e.g. `repo:monorepo-front`); created on demand |
-| `ready` | The user approved it: a Claude may pick it up without asking |
-| `in-progress` | A worker has it (set by `work`) |
+| `ready` | The user approved it: the launcher (`scripts/work.sh`, run by `/todo work` or by inbox-agent's dispatch) may start a worker on it without asking. Marking it `ready` is also the user's permission for that worker to commit on the item's branch |
+| `in-progress` | A worker has it: set by `work.sh` when it launches (it removes `ready`), removed by the worker when it blocks |
+| `large` | Several PRs or repos, needs a plan: `work.sh` refuses it with exit 4 and it goes to `/aw:new`. Set by inbox-agent's triage or by hand |
+
+The board is GitHub Project #5 "Inbox"; its `Status` field is the one view
+of where each item stands:
+
+| Status | Meaning |
+|---|---|
+| Inbox | Not triaged yet |
+| Hoy | A Claude will work it (`ready`) or it is queued |
+| En progreso | A worker has it (`in-progress`) |
+| Para ti | Only the user can do it: the latest comment carries the drafted message or the question with its options. Workers that block land here too |
+| Hecho | Closed: done, already handled, or no longer relevant |
+
+`work.sh <n> --set-status "<Status>"` moves a card; until an option exists
+on the board it says so and the labels and comments carry the state.
 
 Confidentiality: the inbox is a personal repo. For items captured under a
 work account write pointers (ticket keys, PR URLs, file paths, command
 names), never customer data, secrets or pasted internal documents.
 
-First-time setup (repo, labels, collaborator for the work login) is
+First-time setup (repo, labels) is
 `scripts/setup-inbox.sh` next to this file; idempotent, run it when
-`gh repo view asumaran/inbox` fails.
+`ghp repo view asumaran/inbox` fails.
 
 # Session context (injected when the skill loads)
 
@@ -91,25 +108,26 @@ work, do not ask questions; one line back with the issue URL.
    Pointers are the valuable part: a conversation the next Claude will not
    have. Name files with their paths and the lines that matter, the PR or
    ticket being worked, the command that reproduced the problem.
-3. **Labels**: `account:<x>` always; `repo:<name>` inside a repo, created
+3. **Labels**: `account:<x>` always; `org:<masorange|syft|personal>` always
+   (repo owner `masmovil` → masorange, `syftdata` → syft, else personal; a
+   Jira ESHOP key → masorange, a Linear SYF2 key → syft); `repo:<name>` inside a repo, created
    first so the create does not fail on a missing label:
-   `gh label create "repo:<name>" -R asumaran/inbox --color ededed --force`
+   `ghp label create "repo:<name>" -R asumaran/inbox --color ededed --force`
    (idempotent).
 4. **Create**:
    ```bash
-   gh issue create -R asumaran/inbox --title "<title>" --body-file "$tmp" \
-     --label "account:<x>" --label "repo:<name>" --assignee asumaran,alfredo-syft
+   ghp issue create -R asumaran/inbox --title "<title>" --body-file "$tmp" \
+     --label "account:<x>" --label "org:<o>" --label "repo:<name>" --assignee asumaran
    ```
-   Both logins are assigned so the herdr picker (asgotoissues, which lists
-   issues assigned to whoever `gh` has active) shows the item from either
-   account. If the second assignee is refused (collaborator invite not
-   accepted yet), retry with `--assignee asumaran` and say so.
+   Only the personal login is ever assigned or given access: the inbox is a
+   private personal repo and work logins stay out of it. asgotoissues reads it
+   through its own `inbox` stack with the `asumaran` account.
 5. Reply with the URL only, then continue the previous work.
 
 ## list
 
 ```bash
-gh issue list -R asumaran/inbox --state open --limit 50 \
+ghp issue list -R asumaran/inbox --state open --limit 50 \
   --json number,title,labels,createdAt,url
 ```
 
@@ -120,40 +138,73 @@ Close with: `/todo work <n>` launches one.
 
 ## work <n>
 
-1. **Read it**: `gh issue view <n> -R asumaran/inbox --json title,body,labels,url,comments`.
-2. **Where it belongs**: account from `account:<x>` (missing: `personal`);
-   account dir `$HOME/.claude` for personal, else `$HOME/.claude-<x>`.
-   Repo from `repo:<name>` and `checkout:` in the body; when the path is
-   gone, resolve the name with `~/.claude/projects-map.md` (personal) or
-   `~/Developer/<name>` (work); refuse with a clear line if it is nowhere.
-   An item captured outside Claude (GitHub app, `gh`) has no Origin block:
-   derive what you can from the labels and text, and ask only for what is
-   missing.
-3. **Size**, from the body, decided by you:
-   - **Small** (one repo, one PR, a clear done-when): hand it off with the
-     `worktree` skill. Branch `inbox-<n>-<slug>`; `HANDOFF.md` carries the
-     issue body (title, words, Context, Origin), the constraints (base
-     branch, commit/PR rules of that repo), and these two duties: comment
-     the PR URL on the issue when it opens (`gh issue comment <n> -R
-     asumaran/inbox`), and close the issue when the PR merges. Inject the
-     **item's** account dir into the pane, explicitly (`export
-     CLAUDE_CONFIG_DIR=<account dir>` or `--env`), not this session's: the
-     launching contract in the `worktree` skill assumes the launcher's
-     account, and here the label decides.
+Launching is one script, `scripts/work.sh` next to this file, the same one
+inbox-agent's dispatch uses. Do not redo its steps by hand.
+
+1. **Read it**: `ghp issue view <n> -R asumaran/inbox --json title,body,labels,url,comments`.
+2. **Size**, from the body and comments, decided by you before launching:
+   - **Small** (one repo, one PR, a clear done-when): launch it, step 3.
    - **Large** (several PRs or repos, needs a plan) or **no repo**: run
      `/aw:new <issue url>`; it reads inbox issues and launches the
      coordinator with the item's account.
    - **A question or a thought**, nothing to build: answer it here, then
      offer `/todo done <n>`.
-4. **Mark it**: `gh issue edit <n> -R asumaran/inbox --add-label in-progress`
-   and `gh issue comment <n> -R asumaran/inbox --body "Picked up: <worktree
-   or task, account>"`.
-5. Report where it is running (workspace, worktree, account), one line each.
+   An item captured outside Claude (GitHub app, `gh`) has no Origin block:
+   if the repo or the done-when is missing, add it to the issue first (a
+   comment with `Done when: ...`, the `repo:<name>` label) or go Large.
+3. **Preview, then launch**:
+   ```bash
+   ~/.claude/skills/todo/scripts/work.sh <n> --dry-run   # prints, writes nothing
+   ~/.claude/skills/todo/scripts/work.sh <n>
+   ```
+   It refuses a `large` item, resolves the account (`account:<x>`, default
+   personal) and the repo (Origin `checkout:`, else `repo:<name>` under
+   `~/Developer` or the projects map), needs a done-when criterion (a line
+   starting with "Done when" in the body or a comment, with at least one
+   word after it that is not a placeholder such as TBD), checks that no agent `wk_inbox<n>` exists and that the
+   repo does not track a root `HANDOFF.md`, branches `inbox-<n>-<slug>`
+   from `origin/<default branch>`, creates the worktree with `wt`, writes
+   `HANDOFF.md` from `templates/HANDOFF.md` (issue text fenced as untrusted
+   data, repo rules, the worker's Authority; excluded from git), injects
+   the item's `CLAUDE_CONFIG_DIR` into a free pane of the worktree's herdr
+   workspace, re-reads the issue and reserves it (`in-progress`, `ready`
+   removed, "Picked up" comment, Status En progreso), starts `wk_inbox<n>`
+   with `--permission-mode auto`, records its lineage (`inbox#<n>`) and
+   sends the boot prompt. A failed start or an interrupted launcher
+   reverts the reservation, with two exceptions: the start failed because
+   another launch already owns `wk_inbox<n>` (exit 6), or the launcher was
+   interrupted after the agent appeared (the reservation stays, exit 1, the
+   message names the pane to check).
+
+   Dry run: `--dry-run` resolves and prints everything (also the rendered
+   `HANDOFF.md`) and applies exit codes 3/4/6 as a real run, but writes
+   nothing: no fetch, branch, worktree, HANDOFF, GitHub write or pane; the
+   only disk effect is a temp dir under `mktemp`, removed on exit. With
+   `--set-status` it prints the Status it would set and exits 0.
+
+   Exit codes (same list in the header of `work.sh`):
+
+   ```
+   0  launched, or a dry run printed
+   1  error; after the reservation it is reverted, except a failed boot prompt (the agent is alive, the item stays in-progress) or an interrupt after the agent appeared (the reservation stays, the message names the pane)
+   2  usage
+   3  no repo resolved -> Para ti
+   4  needs /aw:new: label `large`, or no done-when criterion -> Para ti
+   5  herdr not reachable: nothing written, the item stays ready
+   6  not launchable: closed, already in-progress, agent wk_inbox<n> exists, or the repo tracks a root HANDOFF.md
+   ```
+
+   For `/todo work`: on 3 or 4 go Large or fix the issue; on 5 nothing
+   changed; on 1 the message says what was left.
+4. Report what it printed (workspace, pane, agent, worktree, account), one
+   line each. The worker ends with a single question (merge to main for
+   `asumaran` repos, a draft PR elsewhere) or, if blocked, moves the item
+   to Para ti with a comment.
 
 ## done <n> [note]
 
 ```bash
-gh issue close <n> -R asumaran/inbox -c "<what happened, with the PR or commit URL>"
+ghp issue close <n> -R asumaran/inbox -c "<what happened, with the PR or commit URL>"
 ```
 
 # Capturing from outside Claude
