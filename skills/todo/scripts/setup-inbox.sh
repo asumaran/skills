@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
 # One-time bootstrap of the asumaran/inbox repo the todo skill writes to.
-# Idempotent: safe to re-run after adding a label or a work login.
+# Idempotent: safe to re-run after adding a label.
 # Runs gh as the personal account, whatever login gh has active.
 set -euo pipefail
 
 REPO="asumaran/inbox"
 PERSONAL="asumaran"
-# Other gh logins on this machine that must see the inbox (the herdr picker
-# lists issues assigned to whoever gh has active). Invited as collaborators
-# and the invitation accepted with their own token.
-WORK_LOGINS=(alfredo-syft)
 
 export GH_TOKEN
 GH_TOKEN="$(gh auth token --user "$PERSONAL")"
@@ -89,27 +85,10 @@ label() { # name color description
 label "account:personal" 1d76db "Work it in the personal Claude (~/.claude)"
 label "account:syft"     0e8a16 "Work it in the Syft Claude (~/.claude-syft)"
 label "account:mas"      fbca04 "Work it in the MasOrange Claude (~/.claude-mas)"
+label "org:masorange"    fbca04 "MasOrange (Jira ESHOP, masmovil)"
+label "org:syft"         0e8a16 "Syft Data (Linear SYF2, syftdata)"
+label "org:personal"     1d76db "Personal projects"
 label "ready"            0052cc "Approved: a Claude may pick it up without asking"
 label "in-progress"      d93f0b "A worker has it"
 
-for login in "${WORK_LOGINS[@]}"; do
-  if gh api "repos/$REPO/collaborators/$login" >/dev/null 2>&1; then
-    echo "collaborator $login (already)"
-    continue
-  fi
-  gh api --method PUT "repos/$REPO/collaborators/$login" -f permission=push >/dev/null
-  token="$(gh auth token --user "$login" 2>/dev/null || true)"
-  if [[ -z "$token" ]]; then
-    echo "invited $login; accept the invitation from that account"
-    continue
-  fi
-  inv="$(GH_TOKEN="$token" gh api /user/repository_invitations \
-    -q ".[] | select(.repository.full_name == \"$REPO\") | .id" | head -1)"
-  if [[ -n "$inv" ]]; then
-    GH_TOKEN="$token" gh api --method PATCH "/user/repository_invitations/$inv" >/dev/null
-    echo "collaborator $login (invitation accepted)"
-  else
-    echo "collaborator $login (invited)"
-  fi
-done
 echo "done: https://github.com/$REPO"

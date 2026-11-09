@@ -22,6 +22,7 @@ Labels:
 | Label | Meaning |
 |---|---|
 | `account:personal` / `account:syft` / `account:mas` | Which Claude works it: `~/.claude`, `~/.claude-syft`, `~/.claude-mas` |
+| `org:masorange` / `org:syft` / `org:personal` | Which organization it belongs to (filter the inbox by company) |
 | `repo:<name>` | The repo it belongs to (bare name, e.g. `repo:monorepo-front`); created on demand |
 | `ready` | The user approved it: a Claude may pick it up without asking |
 | `in-progress` | A worker has it (set by `work`) |
@@ -30,7 +31,7 @@ Confidentiality: the inbox is a personal repo. For items captured under a
 work account write pointers (ticket keys, PR URLs, file paths, command
 names), never customer data, secrets or pasted internal documents.
 
-First-time setup (repo, labels, collaborator for the work login) is
+First-time setup (repo, labels) is
 `scripts/setup-inbox.sh` next to this file; idempotent, run it when
 `gh repo view asumaran/inbox` fails.
 
@@ -91,19 +92,20 @@ work, do not ask questions; one line back with the issue URL.
    Pointers are the valuable part: a conversation the next Claude will not
    have. Name files with their paths and the lines that matter, the PR or
    ticket being worked, the command that reproduced the problem.
-3. **Labels**: `account:<x>` always; `repo:<name>` inside a repo, created
+3. **Labels**: `account:<x>` always; `org:<masorange|syft|personal>` always
+   (repo owner `masmovil` → masorange, `syftdata` → syft, else personal; a
+   Jira ESHOP key → masorange, a Linear SYF2 key → syft); `repo:<name>` inside a repo, created
    first so the create does not fail on a missing label:
    `gh label create "repo:<name>" -R asumaran/inbox --color ededed --force`
    (idempotent).
 4. **Create**:
    ```bash
    gh issue create -R asumaran/inbox --title "<title>" --body-file "$tmp" \
-     --label "account:<x>" --label "repo:<name>" --assignee asumaran,alfredo-syft
+     --label "account:<x>" --label "org:<o>" --label "repo:<name>" --assignee asumaran
    ```
-   Both logins are assigned so the herdr picker (asgotoissues, which lists
-   issues assigned to whoever `gh` has active) shows the item from either
-   account. If the second assignee is refused (collaborator invite not
-   accepted yet), retry with `--assignee asumaran` and say so.
+   Only the personal login is ever assigned or given access: the inbox is a
+   private personal repo and work logins stay out of it. asgotoissues reads it
+   through its own `inbox` stack with the `asumaran` account.
 5. Reply with the URL only, then continue the previous work.
 
 ## list
