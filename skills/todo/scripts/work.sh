@@ -33,12 +33,13 @@
 #      `checkout:` path, else `repo:<name>` -> ~/Developer/<name> or a path in
 #      ~/.claude/projects-map.md. No repo -> exit 3. No done-when criterion
 #      (a line starting with "Done when" in the body or a comment, followed by
-#      at least one word on that line or the next non-empty one) -> exit 4.
+#      at least one word on that line or the next non-empty one, not a
+#      heading nor a placeholder such as TBD) -> exit 4.
 #   3. herdr reachable (`herdr workspace list`) or exit 5.
 #   4. ownership, before touching the worktree: an agent wk_inbox<n> already
 #      exists, or the repo tracks a root HANDOFF.md -> exit 6.
-#   5. git fetch origin; default branch from origin/HEAD (a local ref fetch
-#      does not move, so the order does not matter); `git branch --no-track
+#   5. git fetch origin (the tracked-HANDOFF check repeats after it); default
+#      branch from origin/HEAD (a local ref fetch does not move); `git branch --no-track
 #      inbox-<n>-<slug> origin/<default>` (reused if it exists); `wt new
 #      <branch> -e none -t`; HANDOFF.md from ../templates/HANDOFF.md, listed
 #      in `git rev-parse --git-path info/exclude`; a free shell pane in the
@@ -51,7 +52,8 @@
 #   7. herdr agent start wk_inbox<n> --kind claude -- --permission-mode auto.
 #      Fails because the name exists (another launch owns the item): no
 #      revert, exit 6. Any other failure: revert step 6 (labels and Status as
-#      at the re-read, comment the error) and exit 1. Never a live worker on
+#      at the re-read, comment the error) and exit 1. An interrupt after the
+#      agent appeared keeps the reservation (exit 1, the message says so). Never a live worker on
 #      a dispatchable issue, never a released item under a live worker.
 #   8. lineage: with HERDR_PANE_ID (a parent in herdr) `aswork-lineage launch
 #      --kind task --ref inbox#<n>`; without it the boot prompt makes the
@@ -105,6 +107,10 @@ while (($#)); do
   shift
 done
 [[ "$N" =~ ^[0-9]+$ ]] || usage
+# Any command that fails unexpectedly exits 1, never with its own status: a
+# jq 5 or a git 128 must not read as one of the contract's codes.
+on_error() { die 1 "unexpected failure at line $1 (exit $2)"; }
+trap 'on_error "$LINENO" "$?"' ERR
 command -v jq >/dev/null || die 1 "jq is required"
 command -v python3 >/dev/null || die 1 "python3 is required"
 if ((DRY == 0)) || [[ -z "$ISSUE_JSON_FILE" && -z "$SET_STATUS" ]]; then
@@ -119,8 +125,8 @@ project_set_status() {
   pid="$(ghp project view "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json --jq .id 2>/dev/null)" \
     || { warn "Project #$PROJECT_NUMBER not reachable; Status not set"; return 0; }
   fields="$(ghp project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json 2>/dev/null)" || fields=""
-  fid="$(jq -r '.fields[]? | select(.name=="Status") | .id' <<<"$fields")"
-  oid="$(jq -r --arg o "$status" '.fields[]? | select(.name=="Status") | .options[]? | select(.name==$o) | .id' <<<"$fields" | head -1)"
+  fid="$(jq -r '.fields[]? | select(.name=="Status") | .id' <<<"$fields" 2>/dev/null)" || fid=""
+  oid="$(jq -r --arg o "$status" '.fields[]? | select(.name=="Status") | .options[]? | select(.name==$o) | .id' <<<"$fields" 2>/dev/null | head -1)" || oid=""
   if [[ -z "$fid" || -z "$oid" ]]; then
     note "Project #$PROJECT_NUMBER has no Status option \"$status\" yet; the labels and the comment carry the state."
     return 0
@@ -150,8 +156,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 J="$TMP/issue.json"
 if [[ -n "$ISSUE_JSON_FILE" ]]; then
-  [[ -r "$ISSUE_JSON_FILE" ]] || die 1 "cannot read $ISSUE_JSON_FILE"
-  J="$ISSUE_JSON_FILE"
+  # Copied once: a pipe or /dev/stdin can only be read once.
+  cp "$ISSUE_JSON_FILE" "$J" 2>/dev/null || die 1 "cannot read $ISSUE_JSON_FILE"
 else
   # projectItems needs the read:project scope: without it, read the rest.
   ghp issue view "$N" -R "$INBOX" --json number,title,body,labels,url,comments,state,projectItems >"$TMP/issue.json" 2>/dev/null \
@@ -213,13 +219,19 @@ REPO_OWNER="${REPO_SLUG%%/*}"
 # quote markers and bold), in the body (capture format, pulse Origin) or in a
 # comment (the triage brief), with at least one word after the marker on that
 # line or, when the marker ends the line (a heading), on the next non-empty
-# one. "Done when:" alone or "there is no done when yet" do not count.
+# one (not a heading). "Done when:" alone, a placeholder (TBD, TODO, n/a,
+# ...) or "there is no done when yet" do not count.
+# Exit 0 found, 10 none; anything else (a traceback) is an error, not a 4.
 has_done_when() {
   python3 -I -c '
 import json, re, sys
 issue = json.load(open(sys.argv[1]))
-texts = [issue.get("body") or ""] + [(c or {}).get("body") or "" for c in issue.get("comments") or []]
+def text(x):
+    return x.get("body") or "" if isinstance(x, dict) else ""
+texts = [text(issue)] + [text(c) for c in issue.get("comments") or []]
 marker = re.compile(r"^[\s>*#_-]*done[ -]when\b[\s*_:.-]*(.*)$", re.I)
+heading = re.compile(r"^\s{0,3}#")
+placeholder = re.compile(r"^[\s*_:.?-]*(tbd|todo|tba|n/?a|none|pending|\?+|-+|\.\.\.|<[^>]*>)?[\s*_:.?-]*$", re.I)
 for t in texts:
     lines = t.splitlines()
     for i, line in enumerate(lines):
@@ -229,17 +241,17 @@ for t in texts:
         rest = m.group(1)
         if not rest.strip():
             rest = next((l for l in lines[i + 1:] if l.strip()), "")
-            if marker.match(rest):
+            if marker.match(rest) or heading.match(rest):
                 continue
-        if re.search(r"\w", rest):
+        if re.search(r"\w", rest) and not placeholder.match(rest):
             sys.exit(0)
-sys.exit(1)
+sys.exit(10)
 ' "$J"
 }
 dw_rc=0; has_done_when || dw_rc=$?
 case "$dw_rc" in
   0) ;;
-  1) die 4 "inbox #$N has no done-when criterion (body or triage brief): needs /aw:new or a brief" ;;
+  10) die 4 "inbox #$N has no done-when criterion (body or triage brief): needs /aw:new or a brief" ;;
   *) die 1 "could not check the done-when of inbox #$N (python3 exit $dw_rc)" ;;
 esac
 
@@ -339,9 +351,11 @@ body = issue.get("body") or ""
 vals["BODY"] = fenced(body) if body else "(empty body)"
 parts = []
 for i, c in enumerate(issue.get("comments") or [], 1):
-    who = re.sub(r"[^A-Za-z0-9_.\[\]-]", "", ((c or {}).get("author") or {}).get("login") or "") or "?"
-    when = re.sub(r"[^0-9A-Za-z:.+-]", "", (c or {}).get("createdAt") or "")
-    parts.append("Comment {} by {} at {}.\n\n{}".format(i, who, when or "?", fenced((c or {}).get("body") or "")))
+    c = c if isinstance(c, dict) else {}
+    author = c.get("author") if isinstance(c.get("author"), dict) else {}
+    who = re.sub(r"[^A-Za-z0-9_.\[\]-]", "", str(author.get("login") or "")) or "?"
+    when = re.sub(r"[^0-9A-Za-z:.+-]", "", str(c.get("createdAt") or ""))
+    parts.append("Comment {} by {} at {}.\n\n{}".format(i, who, when or "?", fenced(str(c.get("body") or ""))))
 vals["COMMENTS"] = "\n\n".join(parts) or "(no comments)"
 tpl = open(sys.argv[1]).read()
 sys.stdout.write(re.sub(r"\{\{([A-Z_]+)\}\}", lambda m: vals.get(m.group(1), m.group(0)), tpl))
@@ -433,6 +447,8 @@ WT_WAS_NEW=1; [[ -d "$WORKTREE" ]] && WT_WAS_NEW=0
 WORKTREE="$(cd "$REPO" && wt path "$BRANCH")"
 [[ -d "$WORKTREE" ]] || die 1 "worktree $WORKTREE was not created"
 
+# Again after the fetch: origin/<default> may have moved since check_ownership.
+handoff_tracked && die 6 "the repo tracks a root HANDOFF.md on $BRANCH (seen after the fetch): refusing to overwrite it; the worktree $WORKTREE was left as wt made it"
 render_handoff >"$WORKTREE/HANDOFF.md"
 EXCLUDE="$(git -C "$WORKTREE" rev-parse --path-format=absolute --git-path info/exclude)"
 mkdir -p "$(dirname "$EXCLUDE")"
@@ -475,12 +491,16 @@ herdr pane wait-output "$PANE" --match "work-sh-$TOKEN" --timeout 15000 >/dev/nu
 # wt setup scripts can take minutes: re-read the issue and the agent name right
 # before writing, so the reservation acts on the issue as it is now.
 agent_exists && die 6 "an agent named $AGENT appeared while launching: another launch has inbox #$N"
-ghp issue view "$N" -R "$INBOX" --json state,labels >"$TMP/now.json" || die 1 "could not re-read inbox #$N"
+ghp issue view "$N" -R "$INBOX" --json state,labels,projectItems >"$TMP/now.json" 2>/dev/null \
+  || ghp issue view "$N" -R "$INBOX" --json state,labels >"$TMP/now.json" \
+  || die 1 "could not re-read inbox #$N"
 NOW_STATE="$(jq -r '.state // "OPEN"' "$TMP/now.json")"
 [[ "$NOW_STATE" == OPEN ]] || die 6 "inbox #$N became $NOW_STATE while launching: nothing reserved"
 now_label() { jq -e --arg l "$1" '[.labels[]?.name] | index($l) != null' "$TMP/now.json" >/dev/null; }
 now_label in-progress && die 6 "inbox #$N became in-progress while launching: another launch has it"
 HAD_READY=0; now_label ready && HAD_READY=1
+NOW_STATUS="$(jq -r '[.projectItems[]? | select(.title=="Inbox") | .status.name // empty] | first // ""' "$TMP/now.json" 2>/dev/null)" || NOW_STATUS=""
+[[ -n "$NOW_STATUS" ]] && PRIOR_STATUS="$NOW_STATUS"
 
 RESERVED=0
 revert() {
@@ -497,12 +517,25 @@ revert() {
 }
 # From the reservation until the agent is confirmed, an interrupt or a failing
 # command releases the item: never in-progress without a worker.
-trap 'revert "launcher interrupted"' INT TERM
+# An interrupt during `agent start` may land after herdr started the agent:
+# if it exists, keep the reservation (a live worker may hold it) and say so.
+on_interrupt() {
+  trap - INT TERM ERR
+  if ((RESERVED)) && agent_exists; then
+    die 1 "launcher interrupted after agent $AGENT appeared: inbox #$N stays in-progress; check pane $PANE"
+  fi
+  revert "launcher interrupted"
+}
+trap on_interrupt INT TERM
 trap 'revert "launcher failed at line $LINENO"' ERR
 
-ghp issue edit "$N" -R "$INBOX" --add-label in-progress --remove-label ready >/dev/null \
-  || die 1 "could not label inbox #$N in-progress (nothing reserved)"
+# RESERVED before the edit: a failed edit may still have been applied (a
+# timeout after the write), so its failure reverts too; the item was not
+# in-progress at the re-read, so removing the label cannot release another
+# launch's reservation.
 RESERVED=1
+ghp issue edit "$N" -R "$INBOX" --add-label in-progress --remove-label ready >/dev/null \
+  || revert "could not label inbox #$N in-progress"
 printf 'Picked up: %s, %s account (agent %s).\n' "$WORKTREE" "$ACCOUNT" "$AGENT" >"$TMP/picked.md"
 ghp issue comment "$N" -R "$INBOX" --body-file "$TMP/picked.md" >/dev/null || warn "could not comment on inbox #$N"
 project_set_status "$N" "En progreso"
@@ -512,13 +545,16 @@ if ! herdr agent start "$AGENT" --kind claude --pane "$PANE" -- "${CLAUDE_ARGS[@
   start_err="$(tr '\n' ' ' <"$TMP/start.json" | cut -c1-300)"
   # The name is taken: another launch owns the item and its worker is live.
   # Releasing the reservation now would make a live worker's issue dispatchable.
-  if grep -qiE 'already (exists|in use|taken|registered)|duplicate|name .*(taken|in use)' "$TMP/start.json" || agent_exists; then
+  # Only herdr's own message counts: an agent that exists now may be this
+  # launch's half-started one, which must be reverted like any failure.
+  if grep -qiE 'already (exists|in use|taken|registered)' "$TMP/start.json"; then
     trap - INT TERM ERR
     die 6 "agent $AGENT already exists (another launch owns inbox #$N); reservation left to it: $start_err"
   fi
   revert "herdr agent start $AGENT in pane $PANE failed: $start_err"
 fi
-trap - INT TERM ERR
+trap - INT TERM
+trap 'on_error "$LINENO" "$?"' ERR
 
 # --- 8. Lineage -------------------------------------------------------------------
 if [[ "$LINEAGE_MODE" == launch ]]; then

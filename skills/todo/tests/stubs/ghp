@@ -7,7 +7,10 @@ printf '%s\n' "$*" >>"$GHP_LOG"
 [[ "${GHP_STUB_LIVE:-0}" == 1 ]] || exit 1
 case "$1 $2" in
   "issue view") cat "$GHP_STUB_VIEW" ;;
-  "issue edit") ;;
+  "issue edit")
+    if [[ "${GHP_STUB_EDIT_FAIL:-0}" == 1 && ! -e "$GHP_LOG.edited" ]]; then
+      touch "$GHP_LOG.edited"; exit 1
+    fi ;;
   "issue comment")
     while (($#)); do
       [[ "$1" == --body-file ]] && printf 'BODY: %s\n' "$(cat "$2")" >>"$GHP_LOG"

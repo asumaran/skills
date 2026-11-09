@@ -3,22 +3,28 @@
 # HERDR_STUB_REACHABLE=1. `agent get` succeeds for the names in
 # HERDR_STUB_AGENTS. The workspace and pane of the launch are at
 # $HERDR_STUB_WT. `agent start` follows HERDR_STUB_START: ok, fail, exists
-# (the name is taken), term (the launcher gets SIGTERM meanwhile).
+# (the name is taken), term (the launcher gets SIGTERM meanwhile),
+# term-started (the agent appears, then the launcher gets SIGTERM).
 printf '%s\n' "$*" >>"$HERDR_LOG"
 [[ "${HERDR_STUB_REACHABLE:-0}" == 1 ]] || exit 1
 case "$1 $2" in
   "workspace list")
     jq -n --arg w "${HERDR_STUB_WT:-}" '{result: {workspaces: [{workspace_id: "w1", worktree: {checkout_path: $w}}]}}' ;;
-  "agent get") [[ " ${HERDR_STUB_AGENTS:-} " == *" $3 "* ]] || exit 1; echo '{}' ;;
+  "agent get")
+    [[ " ${HERDR_STUB_AGENTS:-} " == *" $3 "* || -e "$HERDR_LOG.started-$3" ]] || exit 1; echo '{}' ;;
   "pane list") jq -n --arg w "${HERDR_STUB_WT:-}" '{result: {panes: [{pane_id: "p1", cwd: $w}]}}' ;;
   "tab create") echo '{"result":{"root_pane":{"pane_id":"p2"}}}' ;;
   "worktree open"|"pane run"|"pane wait-output"|"agent prompt") ;;
   "agent start")
     case "${HERDR_STUB_START:-ok}" in
       ok) ;;
-      fail) echo "error: pane p1 is not at a shell prompt"; exit 1 ;;
+      fail)
+        # HERDR_STUB_AGENTS_AFTER=1: the half-started agent stays registered.
+        [[ "${HERDR_STUB_AGENTS_AFTER:-0}" == 1 ]] && touch "$HERDR_LOG.started-$3"
+        echo "error: pane p1 is not at a shell prompt"; exit 1 ;;
       exists) echo "error: agent name $3 already exists"; exit 1 ;;
       term) kill -TERM "$PPID"; exit 1 ;;
+      term-started) touch "$HERDR_LOG.started-$3"; kill -TERM "$PPID"; exit 1 ;;
     esac ;;
   *) echo "herdr stub: unexpected call: $*" >&2; exit 99 ;;
 esac

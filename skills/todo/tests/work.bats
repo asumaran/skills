@@ -195,6 +195,16 @@ EXPECTED_HEADINGS='# HANDOFF: inbox #77
   [ "$status" -eq 4 ]
 }
 
+@test "a done-when heading followed by another heading exits 4" {
+  dry done-when-then-heading
+  [ "$status" -eq 4 ]
+}
+
+@test "a placeholder done-when (TBD) exits 4" {
+  dry done-when-placeholder
+  [ "$status" -eq 4 ]
+}
+
 @test "the large label exits 4" {
   dry large
   [ "$status" -eq 4 ]
@@ -224,6 +234,25 @@ EXPECTED_HEADINGS='# HANDOFF: inbox #77
   [ "$status" -eq 6 ]
   [[ "$output" == *"agent named wk_inbox77 already exists"* ]]
   assert_no_github
+}
+
+# --- 1: unexpected failures --------------------------------------------------------------
+
+@test "a malformed issue exits 1, never a contract code" {
+  dry bad-body
+  [ "$status" -eq 1 ]
+}
+
+@test "odd comment entries do not break the check or the render" {
+  dry odd-comments
+  [ "$status" -eq 0 ]
+  [[ "$(handoff)" == *"Comment 1 by ? at ?."* ]]
+}
+
+@test "--issue-json reads a pipe once" {
+  run "$WORK_SH" 77 --dry-run --issue-json <(cat "$FIX/ok.json")
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"title:          Fix the flaky login test"* ]]
 }
 
 # --- Injection -------------------------------------------------------------------------
@@ -340,4 +369,37 @@ EXPECTED_HEADINGS='# HANDOFF: inbox #77
   logged "$RESERVE"
   logged "$REVERT_PLAIN"
   run ! grep -q -- '--add-label ready' "$GHP_LOG"
+}
+
+@test "a failed reservation edit still reverts (it may have been applied)" {
+  GHP_STUB_EDIT_FAIL=1 live ok
+  [ "$status" -eq 1 ]
+  logged "$RESERVE"
+  logged "$REVERT_READY"
+  run ! grep -q "^agent start" "$HERDR_LOG"
+}
+
+@test "an interrupt after the agent appeared keeps the reservation" {
+  HERDR_STUB_START=term-started live ok
+  [ "$status" -eq 1 ]
+  logged "$RESERVE"
+  [[ "$output" == *"stays in-progress"* ]]
+  run ! grep -q -- '--remove-label in-progress' "$GHP_LOG"
+}
+
+@test "a start failure with our own agent registered still reverts" {
+  HERDR_STUB_START=fail HERDR_STUB_AGENTS_AFTER=1 live ok
+  [ "$status" -eq 1 ]
+  logged "$REVERT_READY"
+}
+
+@test "a HANDOFF.md tracked upstream after the last fetch is not overwritten" {
+  src="$BATS_TEST_TMPDIR/src-fakerepo"
+  echo real >"$src/HANDOFF.md"
+  git -C "$src" add HANDOFF.md && git -C "$src" commit -qm handoff
+  git -C "$src" push -q "$BATS_TEST_TMPDIR/fakerepo.git" main
+  live ok
+  [ "$status" -eq 6 ]
+  [ "$(cat "$HOME/$WT_PATH_SUFFIX/HANDOFF.md")" == real ]
+  assert_no_github
 }

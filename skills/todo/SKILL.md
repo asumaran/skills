@@ -161,7 +161,7 @@ inbox-agent's dispatch uses. Do not redo its steps by hand.
    personal) and the repo (Origin `checkout:`, else `repo:<name>` under
    `~/Developer` or the projects map), needs a done-when criterion (a line
    starting with "Done when" in the body or a comment, with at least one
-   word after it), checks that no agent `wk_inbox<n>` exists and that the
+   word after it that is not a placeholder such as TBD), checks that no agent `wk_inbox<n>` exists and that the
    repo does not track a root `HANDOFF.md`, branches `inbox-<n>-<slug>`
    from `origin/<default branch>`, creates the worktree with `wt`, writes
    `HANDOFF.md` from `templates/HANDOFF.md` (issue text fenced as untrusted
