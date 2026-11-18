@@ -1,6 +1,6 @@
 ---
 name: worktree
-description: Create git worktrees with the `wt` CLI so they follow the user's conventions (canonical path ~/wt/{repo}/{branch}, automatic herdr integration), and hand work off to a Claude instance in the worktree's herdr space. Use whenever the user asks to create, add, make, or set up a git worktree for a branch, asks for something to be done "in a new worktree", "in a new space", "in another space/worktree", or "in a separate worktree", or asks to merge, integrate, or bring a worktree or branch back into main.
+description: Create git worktrees with the `wt` CLI so they follow the user's conventions (canonical path ~/wt/{repo}/{branch}, automatic herdr integration), and hand work off to a Claude instance in the worktree's herdr space. Use whenever the user asks to create, add, make, or set up a git worktree for a branch, asks for something to be done "in a new worktree", "in a new space", "in another space/worktree", "in a separate worktree", "in another worker", "in a separate worker", or simply to work on it "separately"/"apart" ("trabájalo separado", "en otro worker", "cada cosa en su worker"), or asks to merge, integrate, or bring a worktree or branch back into main.
 ---
 
 # Creating git worktrees
@@ -20,7 +20,7 @@ wrong most often, so do it explicitly:
 | The user asks for... | Who works | What you do |
 |---|---|---|
 | Only a worktree ("crea un worktree para X") | nobody yet | Create it, report the path and the herdr workspace, stop. |
-| Work **in** a new worktree/space ("haz X en un nuevo worktree", "implementa esto en otro space", "en un worktree aparte", "en un nuevo space de herdr", "abre un claude ahí y que haga X") | **a new Claude instance in that worktree's herdr pane** | Create the worktree, write the handoff, start and prompt the agent there (see "Handing the work off"). **Do not implement it from this session.** |
+| Work **in** a new worktree/space ("haz X en un nuevo worktree", "implementa esto en otro space", "en un worktree aparte", "en un nuevo space de herdr", "abre un claude ahí y que haga X"), or asks to work on it **separately** ("trabájalo separado", "trabájalo aparte", "en otro worker", "en un worker separado", "cada cosa en su worker") | **a new Claude instance in that worktree's herdr pane** | Create the worktree, write the handoff, start and prompt the agent there (see "Handing the work off"). **Do not implement it from this session, and do not run it as a native subagent (Agent tool) of this session.** Then forget the task (dispatch). |
 | Work here, explicitly ("crea el worktree y sigue aquí", "cd al worktree y hazlo tú") | this session | Create it, `cd "$(wt path <branch>)"`, continue. |
 
 Rules of thumb:
@@ -30,6 +30,18 @@ Rules of thumb:
   the user expects a Claude session living in that workspace, visible in the
   sidebar and steerable, to own the task. Creating the worktree and then
   `cd`-ing into it from this session is the failure mode to avoid.
+- A worktree created at the user's request is where the work happens. There is
+  no case where you create it and keep implementing from the session that
+  created it, by `cd`, by `git -C`, or through a subagent, unless the user says
+  so ("sigue aquí").
+- "Worker" in the user's mouth means a separate Claude they can see and talk
+  to. A background subagent of this session is not one: its work stays inside
+  this conversation, which is exactly what the user asked to get away from.
+- It is a **dispatch**. Once the agent is prompted, this session is done with
+  the task: it reports where the work lives and drops it. No watcher, no
+  relaying the worker's notices, no follow-up rounds from here, no edits in
+  that worktree. The user talks to the worker in its pane. Keep a link back
+  only when the user asks for one ("que te reporte", "avísame cuando termine").
 - The rule applies equally when the "separate worktree" was **your own
   suggestion** and the user accepted it ("sí, haz la 3", "ok, hazlo así"). The
   moment the plan says "worktree aparte", the work is delegated.
@@ -185,7 +197,9 @@ from this file.
    (from the aswork plugin; pass the worktree path; it keeps the file
    untracked and excluded), and the prompt tells the agent to read it first
    and never to commit it. For a ticket or PR, the `aw:worker` skill runs
-   this whole sequence.
+   this whole sequence: invoke it with `--herdr` (its default runtime is a
+   native subagent of this session, which is not what a "separate" request
+   asks for) and as a dispatch (its "Dispatch" section).
 3. **Locate the workspace's shell pane** per the `herdr` skill (list
    workspaces, find the one whose cwd is the worktree path, list its panes).
 4. **Inject the account, then start the agent.** The pane's shell inherits
@@ -204,7 +218,8 @@ from this file.
    its task, right after `agent start`:
    `aswork-lineage launch <name> --pane <pane id> --worktree <worktree path>
    --kind ticket|pr|task|other --ref <ticket key, PR url or slug> --title
-   "<one line>"`. Skip only when this session itself is not in herdr
+   "<one line>"`. No `--role`: a dispatched agent has no coordinator, and
+   without a role the turn hooks never send its stops back here. Skip only when this session itself is not in herdr
    (`HERDR_PANE_ID` unset; the command refuses to run there). The
    `aw:worker` skill already does this for its own launches; every other
    agent started from this skill gets recorded here, or it shows up in
@@ -212,9 +227,10 @@ from this file.
 6. **Prompt it** with the task (or "read HANDOFF.md and do what it says"),
    per the `herdr` skill.
 7. **Report to the user** in your final message: workspace, pane, agent name,
-   worktree path, and what the agent was told. If the user asked for the agent
-   to report back, keep a background watcher per the `herdr` skill and relay
-   the result; otherwise stop here.
+   worktree path, and what the agent was told. Then drop the task: do not
+   watch the agent, wait on it, or pick its work back up. Only if the user
+   asked for the agent to report back, keep a background watcher per the
+   `herdr` skill and relay the result.
 
 ### Handoff checklist
 
@@ -234,8 +250,10 @@ findings, decisions, or memory. Include, explicitly:
   which tests to run, anything not to touch.
 - **Origin**: the repo/worktree and workspace this handoff came from, in case
   the agent needs to ask for more context.
-- **Report-back instructions** when the user wants one: where to write the
-  report (e.g. an untracked file in the worktree) and what it must contain.
+- **Who it answers to**: the user, directly in its pane. Say that this
+  session will not follow up, so questions and the final result go to the
+  user there. Report-back instructions (where to write the report, what it
+  must contain) only when the user asked for a link back.
 
 Recovery tip: a session that was mistakenly run headless in the worktree can be
 resumed interactively from its pane with `claude --continue` (sessions are
